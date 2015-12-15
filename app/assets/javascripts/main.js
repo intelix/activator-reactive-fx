@@ -5,8 +5,8 @@ requirejs.config({
         lodash: "/assets/lib/lodash/lodash.min",
         signals: "/assets/lib/js-signals/signals.min",
 
+        config: "app/Config",
         socket: "app/Socket",
-        constants: "app/Constants",
         appEvents: "app/AppEvents"
     },
     packages: ["app"],
@@ -24,4 +24,4 @@ requirejs.config({
     }
 });
 
-require(["socket", "app/main"]);
+require(["lodash", "config", "socket", "app/main"]);

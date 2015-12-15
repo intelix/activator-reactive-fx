@@ -1,59 +1,66 @@
-define(['appEvents'], function (Events) {
+define(['appEvents', 'config'], function (Events, Config) {
 
     var socket;
 
     var reconnectTimer = false;
     var reconnectInterval = 100;
-    var connectionEstablishTimeout = 2000;
+    var connectionTimeout = 2000;
+    var connected = false;
 
-    function _attemptConnection() {
-        console.info("!>>> Trying to connect....");
+    function connect() {
 
-        socket = new WebSocket("ws://localhost:8080");
+        console.info("Connecting to " + Config.websocketEndpoint);
+
+        socket = new WebSocket(Config.websocketEndpoint);
+
         var timeout = setTimeout(function () {
             if (socket) socket.close();
-        }, connectionEstablishTimeout);
+        }, connectionTimeout);
 
         socket.onopen = function (x) {
             clearTimeout(timeout);
-            console.info("!>> Websocket connected");
+            Events.WebsocketConnected.dispatch();
+            connected = true;
+            console.info("Websocket connected");
         };
         socket.onclose = function (x) {
             clearTimeout(timeout);
-            console.info("!>> Websocket disconnected");
+            connected = false;
+            console.info("Websocket disconnected");
             reconnectTimer = setTimeout(function () {
                 reconnectTimer = false;
-                _attemptConnection();
+                connect();
             }, reconnectInterval);
         };
         socket.onmessage = function (e) {
             var payload = e.data;
-            _parse(payload);
+            parsePayload(payload);
         };
     }
 
-    _attemptConnection();
-
-    function _parse(p) {
+    function parsePayload(p) {
         var segments = p.split(":");
-        if (segments[0] == "p") {
-            _send("o:" + segments[1]);
-            console.info("!>>>> Ping!");
-        }
-        if (segments[0] == "u") {
-            Events.PriceUpdateReceived.dispatch({
-                pairId: parseInt(segments[1]),
-                price: parseInt(segments[2])
-            });
-        }
+        if (segments[0] == "p") send("o:" + segments[1]);
+        if (segments[0] == "u") Events.PriceUpdateReceived.dispatch({
+            pairId: parseInt(segments[1]),
+            price: parseInt(segments[2]),
+            source: parseInt(segments[3])
+        });
     }
 
-    function _send(p) {
+    function send(p) {
         socket.send(p);
     }
 
+    function isConnected() {
+        return connected;
+    }
+
+    connect();
+
     return {
-        send: _send
+        send: send,
+        isConnected: isConnected
     };
 
 });

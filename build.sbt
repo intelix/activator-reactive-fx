@@ -2,10 +2,6 @@ import com.typesafe.sbt.digest.Import._
 import com.typesafe.sbt.gzip.Import._
 import com.typesafe.sbt.rjs.Import._
 
-import WebJs._
-import RjsKeys._
-
-
 name := """activator-reactive-fx"""
 
 version := "1.0-SNAPSHOT"
@@ -24,10 +20,7 @@ scalacOptions := Seq(
   "-Xlint",
   "-Xfatal-warnings",
   "-Ywarn-dead-code",
-  "-Ywarn-numeric-widen",
-  //"-Ywarn-unused",
-  //"-Ywarn-unused-import",
-  "-Ywarn-value-discard"
+  "-Ywarn-numeric-widen"
 )
 
 
@@ -44,7 +37,7 @@ val webjarsReqjsTxtVersion = "2.0.14-1"
 val webjarsReactJsVersion = "0.14.3"
 val webjarsJsSignalsVersion = "1.0.0"
 val webjarsLoDashVersion = "3.10.1"
-
+val scalaMetricsVersion = "3.5.2_a2.3"
 
 
 val loggingScala    = "com.typesafe.scala-logging"  %% "scala-logging"                  % scalaLoggingVersion
@@ -52,10 +45,9 @@ val loggingLogback  = "ch.qos.logback"              %  "logback-classic"        
 val akkaSlf4j       = "com.typesafe.akka"           %% "akka-slf4j"                     % akkaVersion
 val akkaHttpCore    = "com.typesafe.akka"           %% "akka-http-core-experimental"    % akkaHTTPVersion
 val akkaHttp        = "com.typesafe.akka"           %% "akka-http-experimental"         % akkaHTTPVersion
-
+val scalaMetrics    = "nl.grons"                    %% "metrics-scala"                  % scalaMetricsVersion
 
 val webjarsJquery   = "org.webjars"                 %  "jquery"                         % webjarsJqueryVersion
-val webjarsBootswatch = "org.webjars"               %  "bootswatch-cosmo"               % webjarsBootswatchVersion
 val webjarsBootstrap= "org.webjars"                 %  "bootstrap"                      % webjarsBootstrapVersion
 val webjarsReqjs    = "org.webjars"                 %  "requirejs"                      % webjarsReqjsVersion
 val webjarsReqjsTxt = "org.webjars"                 %  "requirejs-text"                 % webjarsReqjsTxtVersion
@@ -72,6 +64,7 @@ libraryDependencies ++= Seq(
   akkaSlf4j,
   akkaHttpCore,
   akkaHttp,
+  scalaMetrics,
   webjarsBootstrap,
   webjarsJquery,
   webjarsReactJs,
@@ -84,9 +77,7 @@ libraryDependencies ++= Seq(
 includeFilter in(Assets, LessKeys.less) := "*.less"
 excludeFilter in(Assets, LessKeys.less) := "_*.less"
 
-
 pipelineStages := Seq(rjs, digest, gzip)
-
 
 
 //fork in run := true

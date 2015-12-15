@@ -1,4 +1,4 @@
-<configuration>
+<configuration scan="true">
 
   <appender name="StdOut" class="ch.qos.logback.core.ConsoleAppender">
     <layout class="ch.qos.logback.classic.PatternLayout">
@@ -6,17 +6,17 @@
     </layout>
   </appender>
 
-  <appender name="Sysevents" class="ch.qos.logback.core.ConsoleAppender">
+  <appender name="Metrics" class="ch.qos.logback.core.ConsoleAppender">
     <layout class="ch.qos.logback.classic.PatternLayout">
-      <Pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %msg%n</Pattern>
+      <Pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} Metrics: %msg%n</Pattern>
     </layout>
   </appender>
 
-  <logger name="sysevents" level="DEBUG" additivity="false">
-    <appender-ref ref="Sysevents" />
+  <logger name="metrics" level="DEBUG" additivity="false">
+    <appender-ref ref="Metrics" />
   </logger>
 
-  <root level="DEBUG">
+  <root level="INFO">
     <appender-ref ref="StdOut" />
   </root>
 
