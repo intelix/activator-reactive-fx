@@ -110,8 +110,7 @@ private class ConnectionManagerActor(ref: ActorSelection, endpoints: List[Endpoi
       val flow = FramingStage() atop CodecStage() join DatasourceStreamLinkStage(self)
 
       Tcp().outgoingConnection(connectTo.host, connectTo.port) join flow run() onComplete {
-        case Success(c) =>
-          self ! SuccessfullyConnected(c)
+        case Success(c) => self ! SuccessfullyConnected(c)
         case Failure(f) => self ! ConnectionAttemptFailed()
       }
     case _ -> Connected =>
