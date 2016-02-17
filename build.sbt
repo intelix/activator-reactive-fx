@@ -8,6 +8,8 @@ version := "1.0-SNAPSHOT"
 
 lazy val root = (project in file(".")).enablePlugins(PlayScala, SbtWeb)
 
+resolvers += "Sonatype Snapshots" at "https://oss.sonatype.org/content/repositories/releases/"
+
 
 scalaVersion := "2.11.7"
 
