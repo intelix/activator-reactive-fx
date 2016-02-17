@@ -6,12 +6,12 @@ import akka.util.ByteString
 
 object CodecStage {
   def apply() = BidiFlow.fromGraph(FlowGraph.create() { b =>
-    val in = b.add(Flow[ByteString].map(fromDSBytes))
-    val out = b.add(Flow[ApplicationMessage].map(toDSBytes))
+    val in = b.add(Flow[ByteString].map(fromBytes))
+    val out = b.add(Flow[ApplicationMessage].map(toBytes))
     BidiShape.fromFlows(in, out)
   })
 
-  private def toDSBytes(msg: ApplicationMessage): ByteString = msg match {
+  private def toBytes(msg: ApplicationMessage): ByteString = msg match {
     case StreamRequest(id) => ByteString("r:" + id)
     case StreamCancel(id) => ByteString("c:" + id)
     case PriceUpdate(id, a, sId) => ByteString("u:" + id + ":" + a + ":" + sId)
@@ -20,7 +20,7 @@ object CodecStage {
     case KillServerRequest() => ByteString("k")
   }
 
-  private def fromDSBytes(bytes: ByteString): ApplicationMessage = {
+  private def fromBytes(bytes: ByteString): ApplicationMessage = {
     val s = bytes.utf8String.trim
     s.charAt(0) match {
       case 'k' =>
