@@ -33,11 +33,6 @@ private class WebsocketServer extends Actor with StrictLogging {
       .withDebugLogging(enable = false)
       .withSupervisionStrategy(decider))
 
-
-  def buildFlow(connId: Int) =
-    WebsocketFrameStage() atop CodecStage() atop MetricsStage(connId) atop ThrottlingStage(1000) join WebsocketStreamLinkStage(connId, StreamRegistry.selection)
-
-
   val requestHandler: HttpRequest => HttpResponse = {
     case req@HttpRequest(HttpMethods.GET, Uri.Path("/"), _, _, _) =>
       req.header[UpgradeToWebsocket] match {
@@ -53,6 +48,9 @@ private class WebsocketServer extends Actor with StrictLogging {
     case Success(binding) => self ! SuccessfulBinding(binding)
     case Failure(x) => self ! BindingFailed(x)
   }
+
+  def buildFlow(connId: Int) =
+    WebsocketFrameStage() atop CodecStage() atop MetricsStage(connId) atop ThrottlingStage(1000) join WebsocketStreamLinkStage(connId, StreamRegistry.selection)
 
   private case class SuccessfulBinding(binding: Http.ServerBinding)
 

@@ -53,7 +53,7 @@ private class DatasourceStreamLinkStage(monitorRef: ActorRef) extends GraphStage
     override protected def onTimer(timerKey: Any): Unit = {
       openSubscriptions = openSubscriptions filter {
         case (cId, list) if list.isEmpty =>
-          pendingToDatasource = StreamHead(None, StreamCancel(cId)) +: pendingToDatasource
+          pendingToDatasource = pendingToDatasource :+ StreamHead(None, StreamCancel(cId))
           false
         case _ => true
       }

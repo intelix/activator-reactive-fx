@@ -11,6 +11,10 @@ define(['react', 'socket', 'appEvents'], function (React, Socket, Events) {
             Events.PriceUpdateReceived.add(this.onUpdate);
         },
 
+        componentWillUnmount: function() {
+            Events.PriceUpdateReceived.remove(this.onUpdate);
+        },
+
         onUpdate: function (u) {
             if (u.pairId == this.props.pairId) {
                 var price = _.padRight(u.price / 100000, 7, '0');

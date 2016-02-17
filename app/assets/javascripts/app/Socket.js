@@ -1,4 +1,4 @@
-define(['appEvents', 'config'], function (Events, Config) {
+define(['appEvents'], function (Events) {
 
     var socket;
 
@@ -7,11 +7,14 @@ define(['appEvents', 'config'], function (Events, Config) {
     var connectionTimeout = 2000;
     var connected = false;
 
+    var queryString = url.substring(url.indexOf('?port=') + 1);
+    var websocketEndpoint = "ws://localhost:" + (queryString ? queryString : "8080");
+
     function connect() {
 
         console.info("Connecting to " + Config.websocketEndpoint);
 
-        socket = new WebSocket(Config.websocketEndpoint);
+        socket = new WebSocket(websocketEndpoint);
 
         var timeout = setTimeout(function () {
             if (socket) socket.close();
