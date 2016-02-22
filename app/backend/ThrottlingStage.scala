@@ -60,7 +60,7 @@ private class SimpleThrottledFlow(msgSec: Int) extends GraphStage[FlowShape[Appl
     })
 
     def forwardThrottled() = if (isAvailable(out)) maybeNext foreach { next =>
-      if (tokens > 0 || next.isInstanceOf[PriorityMessage]) {
+      if (tokens > 0) {
         pull(in)
         push(out, next)
         maybeNext = None

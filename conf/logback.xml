@@ -16,7 +16,7 @@
     <appender-ref ref="Metrics" />
   </logger>
 
-  <root level="INFO">
+  <root level="DEBUG">
     <appender-ref ref="StdOut" />
   </root>
 

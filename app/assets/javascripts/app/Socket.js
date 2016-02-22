@@ -7,12 +7,14 @@ define(['appEvents'], function (Events) {
     var connectionTimeout = 2000;
     var connected = false;
 
-    var queryString = url.substring(url.indexOf('?port=') + 1);
+    var q = window.location.search;
+    var idx = q.indexOf('?port=');
+    var queryString = idx > -1 ? q.substring(idx + 1) : false;
     var websocketEndpoint = "ws://localhost:" + (queryString ? queryString : "8080");
 
     function connect() {
 
-        console.info("Connecting to " + Config.websocketEndpoint);
+        console.info("Connecting to " + websocketEndpoint);
 
         socket = new WebSocket(websocketEndpoint);
 

@@ -132,18 +132,21 @@ private class WebsocketStreamLinkStage(connectionId: Int, registryRef: ActorSele
   val in: Inlet[ApplicationMessage] = Inlet("RequestsIn")
   val out: Outlet[ApplicationMessage] = Outlet("UpdatesOut")
   override val shape: FlowShape[ApplicationMessage, ApplicationMessage] = FlowShape(in, out)
+println(s"!>>>> Created... ")
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) with ManuallyControlledStreamProducer with FastStreamConsumer {
-      override lazy val selfRef = getStageActorRef(onMessage)
-      override val in: Inlet[ApplicationMessage] = spec.in
-      override val out: Outlet[ApplicationMessage] = spec.out
-
+      override def selfRef = getStageActorRef(onMessage)
+      override def in: Inlet[ApplicationMessage] = spec.in
+      override def out: Outlet[ApplicationMessage] = spec.out
+  println(s"!>>>> Logic created... ")
       override def preStart(): Unit = {
+        println(s"!>>>> Notifying... $selfRef ")
         registryRef ! WebsocketStreamRef(selfRef)
         super.preStart()
       }
 
       def onMessage(x: (ActorRef, Any)): Unit = datasourceBoundMessage orElse clientBoundMessage apply x._2
     }
+
 }
