@@ -1,11 +1,11 @@
-package backend
+package backend.distributor
 
 import akka.actor._
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.ws.UpgradeToWebsocket
 import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, Uri}
 import akka.stream._
-import akka.stream.scaladsl.Flow
+import backend.shared.CodecStage
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.language.postfixOps
@@ -41,7 +41,6 @@ private class WebsocketServer extends Actor with StrictLogging {
       req.header[UpgradeToWebsocket] match {
         case Some(upgrade) =>
           connectionCounter += 1
-          println(s"!>>>> New request, $upgrade ; $req ")
           upgrade.handleMessages(buildFlow(connectionCounter))
         case None => HttpResponse(400, entity = "Not a valid websocket request!")
       }

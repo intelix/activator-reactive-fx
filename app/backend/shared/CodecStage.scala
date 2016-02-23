@@ -1,17 +1,19 @@
-package backend
+package backend.shared
 
 import akka.stream.BidiShape
 import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.util.ByteString
+import backend._
+import backend.PricerApi._
 
 object CodecStage {
   def apply() = BidiFlow.fromGraph(FlowGraph.create() { b =>
     val in = b.add(Flow[ByteString].map(fromBytes))
-    val out = b.add(Flow[ApplicationMessage].map(toBytes))
+    val out = b.add(Flow[PricerApi].map(toBytes))
     BidiShape.fromFlows(in, out)
   })
 
-  private def toBytes(msg: ApplicationMessage): ByteString = msg match {
+  private def toBytes(msg: PricerApi): ByteString = msg match {
     case StreamRequest(id) => ByteString("r:" + id)
     case StreamCancel(id) => ByteString("c:" + id)
     case PriceUpdate(id, a, sId) => ByteString("u:" + id + ":" + a + ":" + sId)
@@ -20,7 +22,7 @@ object CodecStage {
     case KillServerRequest() => ByteString("k")
   }
 
-  private def fromBytes(bytes: ByteString): ApplicationMessage = {
+  private def fromBytes(bytes: ByteString): PricerApi = {
     val s = bytes.utf8String.trim
     s.charAt(0) match {
       case 'k' =>
@@ -34,9 +36,9 @@ object CodecStage {
       case 'c' => StreamCancel(s.substring(2).toShort)
       case 'u' => s.split(":") match {
         case Array(_, id, a, sId) => PriceUpdate(id.toShort, a.toInt, sId.toByte)
-        case el => println(s"!>>>> Oops: $el "); throw new RuntimeException(s)
+        case el => throw new RuntimeException(s)
       }
-      case _ => println(s"!>>>> Unrecognised: $s "); throw new RuntimeException(s)
+      case _ => throw new RuntimeException(s)
     }
   }
 

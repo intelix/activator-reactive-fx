@@ -1,7 +1,7 @@
-package backend
+package backend.distributor
 
 import akka.actor._
-import backend.StreamLinkProtocol.{DatasourceStreamRef, WebsocketStreamRef}
+import StreamLinkApi.{PricerStreamRef, DistributorStreamRef}
 
 object StreamRegistry {
   private val id = "registry"
@@ -14,19 +14,19 @@ object StreamRegistry {
 
 class StreamRegistry extends Actor {
 
-  private var clients: List[WebsocketStreamRef] = List()
-  private var dataSource: Option[ActorRef] = None
+  private var clients: List[DistributorStreamRef] = List()
+  private var pricer: Option[ActorRef] = None
 
   override def receive: Actor.Receive = {
-    case m: WebsocketStreamRef =>
+    case m: DistributorStreamRef =>
       context.watch(m.ref)
       clients :+= m
-      dataSource foreach (_ ! m)
-    case DatasourceStreamRef(ref) =>
-      dataSource = Some(context.watch(ref))
+      pricer foreach (_ ! m)
+    case PricerStreamRef(ref) =>
+      pricer = Some(context.watch(ref))
       clients foreach (ref ! _)
-    case Terminated(ref) if dataSource.contains(ref) =>
-      dataSource = None
+    case Terminated(ref) if pricer.contains(ref) =>
+      pricer = None
     case Terminated(ref) =>
       clients = clients filterNot (_.ref == ref)
   }

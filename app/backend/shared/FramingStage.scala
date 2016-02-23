@@ -1,8 +1,8 @@
-package backend
+package backend.shared
 
 import akka.stream.BidiShape
 import akka.stream.io.Framing
-import akka.stream.scaladsl.{Flow, FlowGraph, BidiFlow}
+import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.util.ByteString
 
 object FramingStage {

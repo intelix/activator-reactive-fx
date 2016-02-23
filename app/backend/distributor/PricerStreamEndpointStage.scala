@@ -1,33 +1,36 @@
-package backend
+package backend.distributor
 
 import akka.actor.{ActorRef, Terminated}
 import akka.stream.scaladsl.Flow
 import akka.stream.stage._
 import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
-import backend.StreamLinkProtocol.{DatasourceStreamRef, Demand, Payload, WebsocketStreamRef}
+import backend._
+import backend.PricerApi._
+import backend.distributor.StreamLinkApi.{Payload, Demand, DistributorStreamRef, PricerStreamRef}
+import backend.shared.Currencies
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-object DatasourceStreamLinkStage {
-  def apply(parentRef: ActorRef) = Flow.fromGraph(new DatasourceStreamLinkStage(parentRef))
+object PricerStreamEndpointStage {
+  def apply(parentRef: ActorRef) = Flow.fromGraph(new PricerStreamEndpointStage(parentRef))
 }
 
-private class DatasourceStreamLinkStage(monitorRef: ActorRef) extends GraphStage[FlowShape[ApplicationMessage, ApplicationMessage]] {
+private class PricerStreamEndpointStage(monitorRef: ActorRef) extends GraphStage[FlowShape[PricerApi, PricerApi]] {
 
-  val in: Inlet[ApplicationMessage] = Inlet("ClientBound")
-  val out: Outlet[ApplicationMessage] = Outlet("DatasourceBound")
+  val in: Inlet[PricerApi] = Inlet("ClientBound")
+  val out: Outlet[PricerApi] = Outlet("PricerBound")
 
-  override val shape: FlowShape[ApplicationMessage, ApplicationMessage] = FlowShape(in, out)
+  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) with StrictLogging {
 
     case object TimerKey
 
     lazy val self = getStageActorRef(onMessage)
-    var pendingToDatasource: Queue[StreamHead] = Queue()
+    var pendingToPricer: Queue[StreamHead] = Queue()
     var activeWebsocketStreams: Set[ActorRef] = Set()
     var openSubscriptions: Map[Short, List[ActorRef]] = Map()
 
@@ -42,34 +45,34 @@ private class DatasourceStreamLinkStage(monitorRef: ActorRef) extends GraphStage
     })
 
     setHandler(out, new OutHandler {
-      override def onPull(): Unit = pushToDatasource()
+      override def onPull(): Unit = pushToPricer()
     })
 
     override def preStart(): Unit = {
-      monitorRef ! DatasourceStreamRef(self)
+      monitorRef ! PricerStreamRef(self)
       pull(in)
     }
 
     override protected def onTimer(timerKey: Any): Unit = {
       openSubscriptions = openSubscriptions filter {
         case (cId, list) if list.isEmpty =>
-          pendingToDatasource = pendingToDatasource :+ StreamHead(None, StreamCancel(cId))
+          pendingToPricer = pendingToPricer :+ StreamHead(None, StreamCancel(cId))
           false
         case _ => true
       }
-      pushToDatasource()
+      pushToPricer()
       if (openSubscriptions.isEmpty) cancelTimer(TimerKey)
     }
 
     private def onMessage(x: (ActorRef, Any)): Unit = x match {
-      case (_, WebsocketStreamRef(ref)) =>
+      case (_, DistributorStreamRef(ref)) =>
         logger.info(s"Linked with websocket stream at $ref")
         activeWebsocketStreams += ref
         self.watch(ref)
         ref ! Demand(self)
       case (_, Terminated(ref)) =>
         logger.info(s"Broken link with $ref")
-        pendingToDatasource = pendingToDatasource.filterNot(_.maybeRef.contains(ref))
+        pendingToPricer = pendingToPricer.filterNot(_.maybeRef.contains(ref))
         activeWebsocketStreams -= ref
         openSubscriptions = openSubscriptions map {
           case (cId, subscribers) if subscribers.contains(ref) => cId -> subscribers.filterNot(_ == ref)
@@ -79,9 +82,9 @@ private class DatasourceStreamLinkStage(monitorRef: ActorRef) extends GraphStage
         val ccy = Currencies.all(cId.toInt)
         logger.info(s"Subscription request for $ccy")
         if (!openSubscriptions.contains(cId)) {
-          logger.info(s"Opening datasource subscription for $ccy")
-          pendingToDatasource = pendingToDatasource :+ StreamHead(Some(ref), m)
-          pushToDatasource()
+          logger.info(s"Opening pricer subscription for $ccy")
+          pendingToPricer = pendingToPricer :+ StreamHead(Some(ref), m)
+          pushToPricer()
           if (openSubscriptions.isEmpty) schedulePeriodicallyWithInitialDelay(TimerKey, 5 seconds, 5 seconds)
         } else {
           ref ! Demand(self)
@@ -90,22 +93,22 @@ private class DatasourceStreamLinkStage(monitorRef: ActorRef) extends GraphStage
         if (!openSubscriptions.get(cId).exists(_.contains(ref)))
           openSubscriptions += cId -> (openSubscriptions.getOrElse(cId, List()) :+ ref)
       case (_, Payload(ref, m: ServerToClient)) =>
-        pendingToDatasource = StreamHead(Some(ref), m) +: pendingToDatasource
-        pushToDatasource()
+        pendingToPricer = StreamHead(Some(ref), m) +: pendingToPricer
+        pushToPricer()
       case (_, el) => logger.warn(s"Unexpected: $el")
     }
 
-    private def pushToDatasource() = if (isAvailable(out) && pendingToDatasource.nonEmpty)
-      pendingToDatasource.dequeue match {
+    private def pushToPricer() = if (isAvailable(out) && pendingToPricer.nonEmpty)
+      pendingToPricer.dequeue match {
         case (StreamHead(ref, el), queue) =>
           push(out, el)
-          pendingToDatasource = queue
+          pendingToPricer = queue
           ref foreach (_ ! Demand(self))
       }
 
   }
 
-  case class StreamHead(maybeRef: Option[ActorRef], element: ApplicationMessage)
+  case class StreamHead(maybeRef: Option[ActorRef], element: PricerApi)
 
 }
 

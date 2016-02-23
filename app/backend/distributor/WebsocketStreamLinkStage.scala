@@ -1,16 +1,17 @@
-package backend
+package backend.distributor
 
 import akka.actor.{ActorRef, ActorSelection, Terminated}
 import akka.stream.scaladsl.Flow
 import akka.stream.stage.GraphStageLogic.StageActorRef
 import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
 import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
-import backend.StreamLinkProtocol.{Demand, Payload, WebsocketStreamRef}
+import backend.PricerApi
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.annotation.tailrec
 import scala.collection.immutable.Queue
 import scala.language.postfixOps
+import backend.PricerApi._
 
 object WebsocketStreamLinkStage {
   def apply(connectionId: Int, registryRef: ActorSelection) = Flow.fromGraph(new WebsocketStreamLinkStage(connectionId, registryRef))
@@ -19,7 +20,7 @@ object WebsocketStreamLinkStage {
 private trait FastStreamConsumer {
   _: GraphStageLogic =>
 
-  def out: Outlet[ApplicationMessage]
+  def out: Outlet[PricerApi]
 
   private var pendingPing: Option[Ping] = None
   private var pendingClientUpdates: Map[Short, PriceUpdate] = Map()
@@ -59,13 +60,13 @@ private trait FastStreamConsumer {
 private trait ManuallyControlledStreamProducer extends StrictLogging {
   _: GraphStageLogic =>
 
-  def in: Inlet[ApplicationMessage]
+  def in: Inlet[PricerApi]
 
   def selfRef: StageActorRef
 
-  private var datasourceStreamRef: Option[ActorRef] = None
+  private var pricerStreamRef: Option[ActorRef] = None
   private var demand  = 0
-  private var datasourceMessageQueue: Queue[ApplicationMessage] = Queue()
+  private var pricerMessageQueue: Queue[PricerApi] = Queue()
 
   private var openSubscriptions: Set[Short] = Set()
 
@@ -76,11 +77,11 @@ private trait ManuallyControlledStreamProducer extends StrictLogging {
   })
 
   @tailrec private def forwardRequestToPriceEngine(): Unit =
-    if (hasDemand) datasourceStreamRef match {
+    if (hasDemand) pricerStreamRef match {
       case Some(target) =>
         takeQueueHead() orElse takeStreamHead() match {
           case Some(msg) =>
-            target ! Payload(selfRef, msg)
+            target ! StreamLinkApi.Payload(selfRef, msg)
             demand -= 1
             forwardRequestToPriceEngine()
           case _ =>
@@ -89,13 +90,13 @@ private trait ManuallyControlledStreamProducer extends StrictLogging {
     }
 
   def hasDemand = demand > 0
-  def takeQueueHead(): Option[ApplicationMessage] =
-    datasourceMessageQueue.dequeueOption.map {
+  def takeQueueHead(): Option[PricerApi] =
+    pricerMessageQueue.dequeueOption.map {
       case (msg, remainder) =>
-        datasourceMessageQueue = remainder
+        pricerMessageQueue = remainder
         msg
     }
-  def takeStreamHead(): Option[ApplicationMessage] =
+  def takeStreamHead(): Option[PricerApi] =
     if (isAvailable(in)) {
       val next = grab(in)
       next match {
@@ -107,46 +108,43 @@ private trait ManuallyControlledStreamProducer extends StrictLogging {
     } else None
 
 
-  protected val datasourceBoundMessage: PartialFunction[Any, Unit] = {
-    case Demand(sender) =>
-      if (datasourceStreamRef.isEmpty) {
-        logger.info(s"Linked with datasource stream at $sender, re-opening ${openSubscriptions.size} subscription(s)")
+  protected val handlePricerBoundMessage: PartialFunction[Any, Unit] = {
+    case StreamLinkApi.Demand(sender) =>
+      if (pricerStreamRef.isEmpty) {
+        logger.info(s"Linked with pricer stream at $sender, re-opening ${openSubscriptions.size} subscription(s)")
         selfRef.watch(sender)
-        datasourceStreamRef = Some(sender)
-        datasourceMessageQueue = Queue(openSubscriptions.map(x => StreamRequest(x)).toSeq: _*)
+        pricerStreamRef = Some(sender)
+        pricerMessageQueue = Queue(openSubscriptions.map(x => StreamRequest(x)).toSeq: _*)
       }
       demand = 1
       forwardRequestToPriceEngine()
     case Terminated(ref) =>
       logger.info(s"Broken link with $ref")
-      datasourceMessageQueue = Queue()
-      datasourceStreamRef = None
+      pricerMessageQueue = Queue()
+      pricerStreamRef = None
       demand = 0
   }
 
 }
 
 
-private class WebsocketStreamLinkStage(connectionId: Int, registryRef: ActorSelection) extends GraphStage[FlowShape[ApplicationMessage, ApplicationMessage]] {
+private class WebsocketStreamLinkStage(connectionId: Int, registryRef: ActorSelection) extends GraphStage[FlowShape[PricerApi, PricerApi]] {
   spec =>
-  val in: Inlet[ApplicationMessage] = Inlet("RequestsIn")
-  val out: Outlet[ApplicationMessage] = Outlet("UpdatesOut")
-  override val shape: FlowShape[ApplicationMessage, ApplicationMessage] = FlowShape(in, out)
-println(s"!>>>> Created... ")
+  val in: Inlet[PricerApi] = Inlet("RequestsIn")
+  val out: Outlet[PricerApi] = Outlet("UpdatesOut")
+  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) with ManuallyControlledStreamProducer with FastStreamConsumer {
       override def selfRef = getStageActorRef(onMessage)
-      override def in: Inlet[ApplicationMessage] = spec.in
-      override def out: Outlet[ApplicationMessage] = spec.out
-  println(s"!>>>> Logic created... ")
+      override def in: Inlet[PricerApi] = spec.in
+      override def out: Outlet[PricerApi] = spec.out
       override def preStart(): Unit = {
-        println(s"!>>>> Notifying... $selfRef ")
-        registryRef ! WebsocketStreamRef(selfRef)
+        registryRef ! StreamLinkApi.DistributorStreamRef(selfRef)
         super.preStart()
       }
 
-      def onMessage(x: (ActorRef, Any)): Unit = datasourceBoundMessage orElse clientBoundMessage apply x._2
+      def onMessage(x: (ActorRef, Any)): Unit = handlePricerBoundMessage orElse clientBoundMessage apply x._2
     }
 
 }

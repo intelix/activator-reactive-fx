@@ -1,4 +1,4 @@
-package backend
+package backend.shared
 
 object Currencies {
   val all: Array[String] = Array(

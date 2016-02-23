@@ -1,12 +1,13 @@
-package backend
+package backend.distributor
 
 import akka.actor._
 import akka.stream._
 import akka.stream.scaladsl.Tcp
 import akka.stream.scaladsl.Tcp.OutgoingConnection
-import backend.ConnectionManagerActor.Messages.{Connect, ConnectionAttemptFailed, SuccessfullyConnected}
-import backend.ConnectionManagerActor._
-import backend.StreamLinkProtocol._
+import backend.distributor.PricerConnectionManager._
+import backend.distributor.PricerConnectionManager.Messages._
+import backend.distributor.StreamLinkApi.PricerStreamRef
+import backend.shared.{CodecStage, FramingStage}
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.collection.JavaConversions._
@@ -15,30 +16,28 @@ import scala.language.postfixOps
 import scala.util.{Failure, Success}
 
 
-object DatasourceConnection {
+object PricerConnectionManager {
   def start()(implicit sys: ActorSystem) = {
     val cfg = sys.settings.config
-    sys.actorOf(Props(classOf[ConnectionManagerActor],
+    sys.actorOf(Props(classOf[PricerConnectionManager],
       StreamRegistry.selection,
-      List() ++ cfg.getStringList("datasource.servers.enabled") map { id =>
-        Endpoint(cfg.getString(s"datasource.servers.$id.host"), cfg.getInt(s"datasource.servers.$id.port"))
+      List() ++ cfg.getStringList("pricer.servers.enabled") map { id =>
+        Endpoint(cfg.getString(s"pricer.servers.$id.host"), cfg.getInt(s"pricer.servers.$id.port"))
       }))
   }
-}
-
-private object ConnectionManagerActor {
 
   case class Endpoint(host: String, port: Int)
 
-  case class StateData(endpoints: Vector[Endpoint], datasourceLinkRef: Option[ActorRef] = None)
+  case class StateData(endpoints: Vector[Endpoint], pricerStreamRef: Option[ActorRef] = None)
 
-  trait State
+  sealed trait State
 
   case object Disconnected extends State
 
   case object ConnectionPending extends State
 
   case object Connected extends State
+
 
   object Messages {
 
@@ -54,14 +53,14 @@ private object ConnectionManagerActor {
 
 }
 
-private class ConnectionManagerActor(ref: ActorSelection, endpoints: List[Endpoint]) extends FSM[State, StateData] with StrictLogging {
+private class PricerConnectionManager(ref: ActorSelection, endpoints: List[Endpoint]) extends FSM[State, StateData] with StrictLogging {
 
   implicit val sys = context.system
   implicit val ec = context.dispatcher
 
   val decider: Supervision.Decider = {
     case x =>
-      x.printStackTrace()
+      logger.warn("TCP Stream terminated", x)
       Supervision.Stop
   }
   implicit val materializer =
@@ -82,32 +81,32 @@ private class ConnectionManagerActor(ref: ActorSelection, endpoints: List[Endpoi
   }
 
   when(Connected) {
-    case Event(m@DatasourceStreamRef(r), data) =>
+    case Event(m@PricerStreamRef(r), data) =>
       context.watch(r)
-      ref ! DatasourceStreamRef(r)
-      stay() using data.copy(datasourceLinkRef = Some(r))
+      ref ! PricerStreamRef(r)
+      stay() using data.copy(pricerStreamRef = Some(r))
   }
 
   whenUnhandled {
     case Event(Terminated(r), data) =>
-      goto(Disconnected) using data.copy(datasourceLinkRef = None)
-    case Event(m@DatasourceStreamRef(r), data) =>
-      stay() using data.copy(datasourceLinkRef = Some(context.watch(r)))
+      goto(Disconnected) using data.copy(pricerStreamRef = None)
+    case Event(m@PricerStreamRef(r), data) =>
+      stay() using data.copy(pricerStreamRef = Some(context.watch(r)))
     case Event(_, _) => stay()
   }
 
   onTransition {
     case ConnectionPending -> Disconnected =>
-      log.info("Unable to connect to the datasource")
+      log.info("Unable to connect to the pricer")
       setTimer("reconnectDelay", Connect, 1 second, repeat = false)
     case Connected -> Disconnected =>
-      log.info("Lost connection to the datasource")
+      log.info("Lost connection to the pricer")
       self ! Connect
     case _ -> ConnectionPending =>
       val connectTo = stateData.endpoints.head
       log.info(s"Connecting to ${connectTo.host}:${connectTo.port}")
 
-      val processingPipeline = FramingStage() atop CodecStage() join DatasourceStreamLinkStage(self)
+      val processingPipeline = FramingStage() atop CodecStage() join PricerStreamEndpointStage(self)
 
       Tcp().outgoingConnection(connectTo.host, connectTo.port) join processingPipeline run() onComplete {
         case Success(c) =>
@@ -116,7 +115,7 @@ private class ConnectionManagerActor(ref: ActorSelection, endpoints: List[Endpoi
       }
     case _ -> Connected =>
       log.info("Successfully connected")
-      stateData.datasourceLinkRef foreach (ref ! DatasourceStreamRef(_))
+      stateData.pricerStreamRef foreach (ref ! PricerStreamRef(_))
   }
 
 }

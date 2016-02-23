@@ -1,13 +1,16 @@
-package backend
+package backend.pricer
 
 import java.util.Random
 import java.util.concurrent.TimeUnit
 
 import akka.actor.ActorSystem
-import akka.stream.{Attributes, Outlet, Inlet, FlowShape}
 import akka.stream.scaladsl.Flow
 import akka.stream.stage._
-import backend.utils.{SimpleThroughputTracker, Metrics}
+import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
+import backend._
+import backend.PricerApi._
+import backend.shared.Currencies
+import backend.utils.{Metrics, SimpleThroughputTracker}
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.concurrent.duration._
@@ -37,11 +40,11 @@ private object PricePublisherFlowStage {
   def apply(serverId: Int)(implicit sys: ActorSystem) = Flow.fromGraph(new PricePublisherFlowStage(serverId))
 }
 
-private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) extends GraphStage[FlowShape[ApplicationMessage, ApplicationMessage]] with StrictLogging {
-  val in: Inlet[ApplicationMessage] = Inlet("Incoming")
-  val out: Outlet[ApplicationMessage] = Outlet("Outgoing")
+private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) extends GraphStage[FlowShape[PricerApi, PricerApi]] with StrictLogging {
+  val in: Inlet[PricerApi] = Inlet("Incoming")
+  val out: Outlet[PricerApi] = Outlet("Outgoing")
 
-  override val shape: FlowShape[ApplicationMessage, ApplicationMessage] = FlowShape(in, out)
+  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) with Metrics with SimpleThroughputTracker {
 
@@ -50,11 +53,11 @@ private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) 
     case object PingTimer
 
     private[this] val latency = metrics.timer("latency")
-    metrics.gauge(s"datasource.$serverId.msgOut")(calculateThroughputAndReset())
+    metrics.gauge(s"pricer.$serverId.msgOut")(calculateThroughputAndReset())
 
     val TokenReplenishInterval = 200 millis
     val PingInterval = 1 second
-    val UpdatesPerCcyPerSecond = sys.settings.config.getInt("datasource.updates-per-ccy-per-sec")
+    val UpdatesPerCcyPerSecond = sys.settings.config.getInt("pricer.updates-per-ccy-per-sec")
     val TokensForEachCcy = UpdatesPerCcyPerSecond / (1000 / TokenReplenishInterval.toMillis)
 
     var tokens = 0
@@ -112,7 +115,7 @@ private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) 
       }
     }
 
-    def pushAndConsumeToken(m: ApplicationMessage) = {
+    def pushAndConsumeToken(m: PricerApi) = {
       push(out, m)
       tokens -= 1
       updateThroughput(1)

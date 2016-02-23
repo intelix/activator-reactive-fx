@@ -1,8 +1,9 @@
-package backend
+package backend.distributor
 
 import akka.stream._
 import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.stream.stage._
+import backend.PricerApi
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -10,18 +11,18 @@ import scala.language.postfixOps
 object ThrottlingStage {
 
   def apply(msgSec: Int) = BidiFlow.fromGraph(FlowGraph.create() { b =>
-    val in = b.add(Flow[ApplicationMessage])
+    val in = b.add(Flow[PricerApi])
     val out = b.add(Flow.fromGraph(new SimpleThrottledFlow(msgSec)))
     BidiShape.fromFlows(in, out)
   })
 
 }
 
-private class SimpleThrottledFlow(msgSec: Int) extends GraphStage[FlowShape[ApplicationMessage, ApplicationMessage]] {
-  val in: Inlet[ApplicationMessage] = Inlet("Inbound")
-  val out: Outlet[ApplicationMessage] = Outlet("ThrottledOut")
+private class SimpleThrottledFlow(msgSec: Int) extends GraphStage[FlowShape[PricerApi, PricerApi]] {
+  val in: Inlet[PricerApi] = Inlet("Inbound")
+  val out: Outlet[PricerApi] = Outlet("ThrottledOut")
 
-  override val shape: FlowShape[ApplicationMessage, ApplicationMessage] = FlowShape(in, out)
+  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) {
 
@@ -33,7 +34,7 @@ private class SimpleThrottledFlow(msgSec: Int) extends GraphStage[FlowShape[Appl
     var tokens = 0
     var lastTokensIssuedAt = 0L
 
-    var maybeNext: Option[ApplicationMessage] = None
+    var maybeNext: Option[PricerApi] = None
 
     override def preStart(): Unit = {
       schedulePeriodically(TokensTimer, TokenReplenishInterval)

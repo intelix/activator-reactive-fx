@@ -1,8 +1,8 @@
-package backend
+package backend.distributor
 
 import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.stream.BidiShape
-import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph, Sink}
+import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.util.ByteString
 
 object WebsocketFrameStage {

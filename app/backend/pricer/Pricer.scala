@@ -1,24 +1,25 @@
-package backend
+package backend.pricer
 
 import akka.actor.ActorSystem
 import akka.stream._
 import akka.stream.scaladsl.Tcp
+import backend.shared.{CodecStage, FramingStage}
 import com.typesafe.config._
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.collection.JavaConversions._
 import scala.language.postfixOps
 
-object PriceDatasource {
+object Pricer {
   def start()(implicit sys: ActorSystem) = {
     implicit val cfg = sys.settings.config
-    cfg.getStringList("datasource.servers.enabled").zipWithIndex.foreach { case (id, i) =>
-      startIsolated(cfg.getString(s"datasource.servers.$id.host"), cfg.getInt(s"datasource.servers.$id.port"), i + 1)
+    cfg.getStringList("pricer.servers.enabled").zipWithIndex.foreach { case (id, i) =>
+      startIsolated(cfg.getString(s"pricer.servers.$id.host"), cfg.getInt(s"pricer.servers.$id.port"), i + 1)
     }
   }
 
   private def startIsolated(host: String, port: Int, serverId: Int)(implicit cfg: Config) = new StrictLogging {
-    implicit val system = ActorSystem("datasource", cfg)
+    implicit val system = ActorSystem("pricer", cfg)
 
     val decider: Supervision.Decider = {
       case x =>

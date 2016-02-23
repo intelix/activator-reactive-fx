@@ -1,7 +1,9 @@
 package backend
 
 import akka.actor.ActorSystem
-import backend.utils.SystemMonitor
+import backend.pricer.Pricer
+import backend.utils.CPUMonitor
+import backend.distributor.{WebsocketServer, PricerConnectionManager, StreamRegistry}
 import com.typesafe.config.ConfigFactory
 import play.api.{Application, GlobalSettings}
 
@@ -11,15 +13,15 @@ object BackendBootstrap extends GlobalSettings {
 
     implicit val sys = ActorSystem("backend", ConfigFactory.load("backend.conf"))
 
-    PriceDatasource.start()
-
     StreamRegistry.start()
 
-    DatasourceConnection.start()
+    Pricer.start()
+
+    PricerConnectionManager.start()
 
     WebsocketServer.start()
 
-    SystemMonitor.start()
+    CPUMonitor.start()
 
   }
 
