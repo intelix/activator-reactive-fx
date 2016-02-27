@@ -5,7 +5,7 @@ import akka.stream.scaladsl.Flow
 import akka.stream.stage._
 import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
 import backend._
-import backend.PricerApi._
+import backend.PricerMsg._
 import backend.distributor.StreamLinkApi.{Payload, Demand, DistributorStreamRef, PricerStreamRef}
 import backend.shared.Currencies
 import com.typesafe.scalalogging.StrictLogging
@@ -18,12 +18,12 @@ object PricerStreamEndpointStage {
   def apply(parentRef: ActorRef) = Flow.fromGraph(new PricerStreamEndpointStage(parentRef))
 }
 
-private class PricerStreamEndpointStage(monitorRef: ActorRef) extends GraphStage[FlowShape[PricerApi, PricerApi]] {
+private class PricerStreamEndpointStage(monitorRef: ActorRef) extends GraphStage[FlowShape[PricerMsg, PricerMsg]] {
 
-  val in: Inlet[PricerApi] = Inlet("ClientBound")
-  val out: Outlet[PricerApi] = Outlet("PricerBound")
+  val in: Inlet[PricerMsg] = Inlet("ClientBound")
+  val out: Outlet[PricerMsg] = Outlet("PricerBound")
 
-  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
+  override val shape: FlowShape[PricerMsg, PricerMsg] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) with StrictLogging {
 
@@ -31,14 +31,14 @@ private class PricerStreamEndpointStage(monitorRef: ActorRef) extends GraphStage
 
     lazy val self = getStageActorRef(onMessage)
     var pendingToPricer: Queue[StreamHead] = Queue()
-    var activeWebsocketStreams: Set[ActorRef] = Set()
+    var activeDistributorStreams: Set[ActorRef] = Set()
     var openSubscriptions: Map[Short, List[ActorRef]] = Map()
 
     setHandler(in, new InHandler {
       override def onPush(): Unit = {
         grab(in) match {
           case m@PriceUpdate(cId, _, _) => openSubscriptions get cId foreach (_.foreach(_ ! m))
-          case m: Ping => activeWebsocketStreams foreach (_ ! m)
+          case m: Ping => activeDistributorStreams foreach (_ ! m)
         }
         pull(in)
       }
@@ -66,14 +66,14 @@ private class PricerStreamEndpointStage(monitorRef: ActorRef) extends GraphStage
 
     private def onMessage(x: (ActorRef, Any)): Unit = x match {
       case (_, DistributorStreamRef(ref)) =>
-        logger.info(s"Linked with websocket stream at $ref")
-        activeWebsocketStreams += ref
+        logger.info(s"Linked with distributor stream at $ref")
+        activeDistributorStreams += ref
         self.watch(ref)
         ref ! Demand(self)
       case (_, Terminated(ref)) =>
         logger.info(s"Broken link with $ref")
         pendingToPricer = pendingToPricer.filterNot(_.maybeRef.contains(ref))
-        activeWebsocketStreams -= ref
+        activeDistributorStreams -= ref
         openSubscriptions = openSubscriptions map {
           case (cId, subscribers) if subscribers.contains(ref) => cId -> subscribers.filterNot(_ == ref)
           case other => other
@@ -108,7 +108,7 @@ private class PricerStreamEndpointStage(monitorRef: ActorRef) extends GraphStage
 
   }
 
-  case class StreamHead(maybeRef: Option[ActorRef], element: PricerApi)
+  case class StreamHead(maybeRef: Option[ActorRef], element: PricerMsg)
 
 }
 

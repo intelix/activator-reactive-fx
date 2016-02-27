@@ -82,4 +82,5 @@ excludeFilter in(Assets, LessKeys.less) := "_*.less"
 pipelineStages := Seq(rjs, digest, gzip)
 
 
-//fork in run := true
+
+fork in run := true

@@ -9,7 +9,7 @@ define(['appEvents'], function (Events) {
 
     var q = window.location.search;
     var idx = q.indexOf('?port=');
-    var queryString = idx > -1 ? q.substring(idx + 1) : false;
+    var queryString = idx > -1 ? q.substring(idx + 6) : false;
     var websocketEndpoint = "ws://localhost:" + (queryString ? queryString : "8080");
 
     function connect() {

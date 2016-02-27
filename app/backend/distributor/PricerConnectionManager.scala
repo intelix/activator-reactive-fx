@@ -107,10 +107,8 @@ private class PricerConnectionManager(ref: ActorSelection, endpoints: List[Endpo
       log.info(s"Connecting to ${connectTo.host}:${connectTo.port}")
 
       val processingPipeline = FramingStage() atop CodecStage() join PricerStreamEndpointStage(self)
-
       Tcp().outgoingConnection(connectTo.host, connectTo.port) join processingPipeline run() onComplete {
-        case Success(c) =>
-          self ! SuccessfullyConnected(c)
+        case Success(c) => self ! SuccessfullyConnected(c)
         case Failure(f) => self ! ConnectionAttemptFailed()
       }
     case _ -> Connected =>

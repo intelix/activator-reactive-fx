@@ -8,7 +8,7 @@ import akka.stream.scaladsl.Flow
 import akka.stream.stage._
 import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
 import backend._
-import backend.PricerApi._
+import backend.PricerMsg._
 import backend.shared.Currencies
 import backend.utils.{Metrics, SimpleThroughputTracker}
 import com.typesafe.scalalogging.StrictLogging
@@ -40,11 +40,11 @@ private object PricePublisherFlowStage {
   def apply(serverId: Int)(implicit sys: ActorSystem) = Flow.fromGraph(new PricePublisherFlowStage(serverId))
 }
 
-private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) extends GraphStage[FlowShape[PricerApi, PricerApi]] with StrictLogging {
-  val in: Inlet[PricerApi] = Inlet("Incoming")
-  val out: Outlet[PricerApi] = Outlet("Outgoing")
+private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) extends GraphStage[FlowShape[PricerMsg, PricerMsg]] with StrictLogging {
+  val in: Inlet[PricerMsg] = Inlet("Incoming")
+  val out: Outlet[PricerMsg] = Outlet("Outgoing")
 
-  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
+  override val shape: FlowShape[PricerMsg, PricerMsg] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) with Metrics with SimpleThroughputTracker {
 
@@ -115,7 +115,7 @@ private class PricePublisherFlowStage(serverId: Int)(implicit sys: ActorSystem) 
       }
     }
 
-    def pushAndConsumeToken(m: PricerApi) = {
+    def pushAndConsumeToken(m: PricerMsg) = {
       push(out, m)
       tokens -= 1
       updateThroughput(1)

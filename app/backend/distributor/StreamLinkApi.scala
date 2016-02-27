@@ -1,7 +1,7 @@
 package backend.distributor
 
 import akka.actor.ActorRef
-import backend.PricerApi
+import backend.PricerMsg
 
 object StreamLinkApi {
 
@@ -11,6 +11,6 @@ object StreamLinkApi {
 
   case class Demand(sender: ActorRef)
 
-  case class Payload(sender: ActorRef, msg: PricerApi)
+  case class Payload(sender: ActorRef, msg: PricerMsg)
 
 }

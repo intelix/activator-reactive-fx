@@ -12,11 +12,11 @@
     </layout>
   </appender>
 
-  <logger name="metrics" level="DEBUG" additivity="false">
+  <logger name="metrics" level="INFO" additivity="false">
     <appender-ref ref="Metrics" />
   </logger>
 
-  <root level="DEBUG">
+  <root level="INFO">
     <appender-ref ref="StdOut" />
   </root>
 

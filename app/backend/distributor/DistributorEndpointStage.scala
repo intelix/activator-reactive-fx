@@ -5,22 +5,22 @@ import akka.stream.scaladsl.Flow
 import akka.stream.stage.GraphStageLogic.StageActorRef
 import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
 import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
-import backend.PricerApi
+import backend.PricerMsg
 import com.typesafe.scalalogging.StrictLogging
 
 import scala.annotation.tailrec
 import scala.collection.immutable.Queue
 import scala.language.postfixOps
-import backend.PricerApi._
+import backend.PricerMsg._
 
-object WebsocketStreamLinkStage {
-  def apply(connectionId: Int, registryRef: ActorSelection) = Flow.fromGraph(new WebsocketStreamLinkStage(connectionId, registryRef))
+object DistributorEndpointStage {
+  def apply(connectionId: Int, registryRef: ActorSelection) = Flow.fromGraph(new DistributorEndpointStage(connectionId, registryRef))
 }
 
 private trait FastStreamConsumer {
   _: GraphStageLogic =>
 
-  def out: Outlet[PricerApi]
+  def out: Outlet[PricerMsg]
 
   private var pendingPing: Option[Ping] = None
   private var pendingClientUpdates: Map[Short, PriceUpdate] = Map()
@@ -60,13 +60,12 @@ private trait FastStreamConsumer {
 private trait ManuallyControlledStreamProducer extends StrictLogging {
   _: GraphStageLogic =>
 
-  def in: Inlet[PricerApi]
-
+  def in: Inlet[PricerMsg]
   def selfRef: StageActorRef
 
   private var pricerStreamRef: Option[ActorRef] = None
   private var demand  = 0
-  private var pricerMessageQueue: Queue[PricerApi] = Queue()
+  private var pricerMessageQueue: Queue[PricerMsg] = Queue()
 
   private var openSubscriptions: Set[Short] = Set()
 
@@ -90,13 +89,13 @@ private trait ManuallyControlledStreamProducer extends StrictLogging {
     }
 
   def hasDemand = demand > 0
-  def takeQueueHead(): Option[PricerApi] =
+  def takeQueueHead(): Option[PricerMsg] =
     pricerMessageQueue.dequeueOption.map {
       case (msg, remainder) =>
         pricerMessageQueue = remainder
         msg
     }
-  def takeStreamHead(): Option[PricerApi] =
+  def takeStreamHead(): Option[PricerMsg] =
     if (isAvailable(in)) {
       val next = grab(in)
       next match {
@@ -128,17 +127,17 @@ private trait ManuallyControlledStreamProducer extends StrictLogging {
 }
 
 
-private class WebsocketStreamLinkStage(connectionId: Int, registryRef: ActorSelection) extends GraphStage[FlowShape[PricerApi, PricerApi]] {
+private class DistributorEndpointStage(connectionId: Int, registryRef: ActorSelection) extends GraphStage[FlowShape[PricerMsg, PricerMsg]] {
   spec =>
-  val in: Inlet[PricerApi] = Inlet("RequestsIn")
-  val out: Outlet[PricerApi] = Outlet("UpdatesOut")
-  override val shape: FlowShape[PricerApi, PricerApi] = FlowShape(in, out)
+  val in: Inlet[PricerMsg] = Inlet("RequestsIn")
+  val out: Outlet[PricerMsg] = Outlet("UpdatesOut")
+  override val shape: FlowShape[PricerMsg, PricerMsg] = FlowShape(in, out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) with ManuallyControlledStreamProducer with FastStreamConsumer {
       override def selfRef = getStageActorRef(onMessage)
-      override def in: Inlet[PricerApi] = spec.in
-      override def out: Outlet[PricerApi] = spec.out
+      override def in: Inlet[PricerMsg] = spec.in
+      override def out: Outlet[PricerMsg] = spec.out
       override def preStart(): Unit = {
         registryRef ! StreamLinkApi.DistributorStreamRef(selfRef)
         super.preStart()

@@ -3,7 +3,7 @@ package backend
 import akka.actor.ActorSystem
 import backend.pricer.Pricer
 import backend.utils.CPUMonitor
-import backend.distributor.{WebsocketServer, PricerConnectionManager, StreamRegistry}
+import backend.distributor.{Distributor, PricerConnectionManager, StreamRegistry}
 import com.typesafe.config.ConfigFactory
 import play.api.{Application, GlobalSettings}
 
@@ -19,7 +19,7 @@ object BackendBootstrap extends GlobalSettings {
 
     PricerConnectionManager.start()
 
-    WebsocketServer.start()
+    Distributor.start()
 
     CPUMonitor.start()
 

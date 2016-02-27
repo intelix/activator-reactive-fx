@@ -1,12 +1,12 @@
 package backend
 
-trait PricerApi
+trait PricerMsg
 
-object PricerApi {
+object PricerMsg {
 
-  trait ServerToClient extends PricerApi
+  trait ServerToClient extends PricerMsg
 
-  trait ClientToServer extends PricerApi
+  trait ClientToServer extends PricerMsg
 
   case class StreamRequest(cId: Short) extends ServerToClient
 

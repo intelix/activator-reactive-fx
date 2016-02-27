@@ -1,0 +1,912 @@
+<html>
+<head>
+    <title>ReactiveFX Template</title>
+</head>
+
+<body>
+
+<div>
+    <h2>Introduction</h2>
+    <p>Akka Streams framework provides basic building blocks for implementing non-blocking back-pressured streaming
+        systems. This tutorial is presented in a 'how-to' format that covers a number of common challenges you may come
+        across when working with Akka Streams.</p>
+
+    <p>In this tutorial we are looking at -</p>
+    <ul>
+        <li>How to implement a light-weight, fast and scalable websocket endpoint</li>
+        <li>How to create inter-process back-pressured streams</li>
+        <li>How to subscribe to live streams of data</li>
+        <li>How to deal with very fast data sources</li>
+        <li>How to automatically recover end-to-end flow, with a minimal impact on the user experience</li>
+        <li>How to scale the application to improve availability or in response to a higher demand</li>
+    </ul>
+
+    <p>
+        Reactive FX is a sample application designed to provide a real-world like context for the problems and
+        demonstrate some possible solutions. The application represents a Forex dealer dashboard, which interfaces with
+        a remote pricing engine and allows users to subscribe to price streams through the web interface.
+    </p>
+
+    <img src="tutorial/img/screenshot1.png"/>
+
+    <p>
+        New subscriptions are added using the form in the top left corner of the screen. The live streams are
+        represented by individual tiles, which also show the source of the data. Finally, for demonstration purposes it
+        is possible to shut down the current live source of data with 'Kill Pricer' button. When the current source
+        dies, the system is expected to automatically switch to another source if there is one available.
+    </p>
+
+    <p>For the purpose of this tutorial we made the following assumptions:</p>
+    <ul>
+        <li>Pricer is a fast producer, with a total update rate reaching 10,000 messages/sec on a single stream.</li>
+        <li>Users are around the globe, network is not reliable and client connections could be slow</li>
+        <li>User should only see the latest tick for any currency pair at any point in time</li>
+    </ul>
+
+    <h3>High level architecture</h3>
+
+    <img src="tutorial/img/hl1.png"/>
+
+    <p>Reactive FX is a distributed system that consists of Distributor and Pricer components, and runs on multiple
+        interconnected
+        nodes. For the purposes of this tutorial we are assuming four independent nodes: one running Distributor and
+        others
+        running Pricer replicas. Distributor component listens on port 8080 and accepts websocket connections. Pricer
+        replicas listen on ports 8881, 8882 and 8883. For the purposes of the tutorial we are going to run the entire
+        system in a single
+        JVM, with each node isolated in its own Actor System. If needed, the template can be easily modified to run each
+        node in its own JVM (see <a href="#code/app/backend/BackendBootstrap.scala"
+                                    class="shortcut">BackendBootstrap</a> and <a
+                href="#code/app/backend/pricer/Pricer.scala" class="shortcut">Pricer</a> to get an idea how the
+        components are started).</p>
+
+</div>
+
+<div>
+    <h2>Websocket endpoint</h2>
+
+    <p>Open <a href="#code/app/backend/distributor/Distributor.scala" class="shortcut">Distributor.scala</a></p>
+
+    <p>The implementation is based on Akka HTTP which supports Websockets. Akka HTTP is built on top of Akka
+        Streams, and each websocket connection will be attached to the dedicated stream which will have the same
+        lifecycle as the underlying websocket session.</p>
+
+    <p>Let's step through the implementation</p>
+
+    <p>Stream construction is a two-step process. First, the definition, or a 'blueprint' of the stream is constructed.
+        That definition can be then 'materialized' into a running instance. Materialization may, for example, start actors
+        that would power the underlying stream. For this to happen we need to have a <code>Materializer</code> in
+        the scope: </p>
+      <pre><code>   val decider: Supervision.Decider = {
+        case x =>
+          logger.error("Stream terminated", x)
+          Supervision.Stop
+        }
+
+    implicit val mat = ActorMaterializer(
+          ActorMaterializerSettings(context.system)
+            .withDebugLogging(enable = false)
+            .withSupervisionStrategy(decider))</code></pre>
+    <p>Refer to <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-flows-and-basics.html#Stream_Materialization">Basics and working with Flows</a>
+        from the official documentation to learn more about materialiation process</p>
+    <p>
+        The <code>decider</code> defines the supervision strategy that will be applied for each started stream. In this
+        case we are just terminating the stream if anything goes wrong, which will in turn terminate the websocket session.
+    </p>
+
+    <p>Next we initialise the HTTP Listener, which binds to the specified host and port, and takes a handler which is a
+        function <code>HttpRequest => HttpResponse</code>. That handler will be used to process all incoming requests:
+    </p>
+      <pre><code> Http().bindAndHandleSync(handler = requestHandler, interface = host, port = port) onComplete {
+    case Success(binding) => self ! SuccessfulBinding(binding)
+    case Failure(x) => self ! BindingFailed(x)
+  }</code></pre>
+    <p><code>bindAndHandleSync</code> returns a <code>Future[ServerBinding]</code>. In our implementation we simply log
+        the status of the binding, but you may want, for example, to terminate the process or to try again.</p>
+
+    <p>
+        Handler is used to make a decision on an incoming request. Here you can, for example, implement a routing based
+        on request parameters or to start a specific flavour of a stream:
+    </p>
+      <pre><code> val requestHandler: HttpRequest => HttpResponse = {
+    case req@HttpRequest(HttpMethods.GET, Uri.Path("/"), _, _, _) =>
+      req.header[UpgradeToWebsocket] match {
+        case Some(upgrade) =>
+          connectionCounter += 1
+          upgrade.handleMessages(buildFlow(connectionCounter))
+        case None => HttpResponse(400, entity = "Not a valid websocket request!")
+      }
+    case _: HttpRequest => HttpResponse(404, entity = "Unknown resource!")
+  }
+</code></pre>
+    <p>
+        You may parameterize the flow like in this example with the <code>connectionCounter</code>, or you can create a single
+        instance of the flow graph and reuse it.
+    </p>
+
+
+    <p>
+        Next, we need to define the stream. When client opens TCP connection, it is represented with a shape of a <code>Flow</code>.
+        It will have one input - for traffic from server to client, and one output - for traffic from client to server:
+    </p>
+
+    <p>
+        <img src="tutorial/img/flow.png"/>
+    </p>
+
+
+    <p>
+        In order to construct the stream we
+        need to close all open inlets and outlets - this would produce a RunnableGraph. In this case we are closing it
+        with another Flow which also have one input and one output, but this time input will receive server-bound
+        traffic and output will receive client-bound traffic.
+    </p>
+
+    <p>
+        To visualise this, consider a simple case, when we want just to echo the message back to server. For that we
+        need to take the element from the input and emit it back into the output. That would be the implementation of
+        the flow, which we would need to provide to <code>upgrade.handleMessages(..)</code>:
+    </p>
+
+    <p>
+        <img src="tutorial/img/echo.png"/>
+    </p>
+
+    <p>
+        Now, consider the case when you need to decrypt the bytes received from the client, process them, encrypt the
+        response and finally send the bytes back. In order to do that, first we would need to attach one flow to the
+        output of the TCP flow, which would take the raw inbound bytes and run it through some decryption logic. This
+        will be followed by another flow that would take that decrypted stream and process it. This will be followed by
+        the final flow that would take the result of the processing, encrypt it and return encrypted bytes. The other
+        end of that final flow we would need to plug back to the TCP input port. This would 'close' the loop and produce
+        a runnable graph:
+    </p>
+
+    <p>
+        <img src="tutorial/img/codec1.png"/>
+    </p>
+
+    <p>
+        Now if you consider decryption and encryption flows as a single piece, with two flows running
+        in opposite direction on top of each other, you would visualise the BidiFlow shape. This element would have two
+        inputs (one for decryptor and one for encryptor) and two outputs (one from dycryptor and one from encryptor):
+
+    </p>
+
+    <p>
+        <img src="tutorial/img/codec2.png"/>
+    </p>
+
+
+    <p>
+        Our stream consists of a multiple stages put on top of each other, and
+        closed with the <code>DistributorEndpointStage</code> stage:
+    </p>
+      <pre><code> def buildFlow(connId: Int) =
+    WebsocketFrameStage() atop CodecStage() atop MetricsStage(connId) atop ShapingStage(1000) join DistributorEndpointStage(connId, StreamRegistry.selection)
+</code></pre>
+
+    <p>
+        <img src="tutorial/img/distributor_stream.png"/>
+    </p>
+
+    <ol>
+        <li><a href="#code/app/backend/distributor/WebsocketFrameStage.scala" class="shortcut">WebsocketFrameStage</a>: <code>BidiFlow[Message, ByteString, ByteString, Message, _]</code> - turns websocket-specific
+            payloads (text message, binary message) into string payloads and back
+        </li>
+        <li><a href="#code/app/backend/shared/CodecStage.scala" class="shortcut">CodecStage</a>: <code>BidiFlow[ByteString, PricerMsg, PricerMsg, ByteString, _]</code> - websocket to pricer dialect codec
+        </li>
+        <li><a href="#code/app/backend/distributor/MetricsStage.scala" class="shortcut">MetricsStage</a>: <code>BidiFlow[PricerMsg, PricerMsg, PricerMsg, PricerMsg, _]</code> - calculates throughput stats for outgoing traffic
+        </li>
+        <li><a href="#code/app/backend/distributor/ShapingStage.scala" class="shortcut">ShapingStage</a>: <code>BidiFlow[PricerMsg, PricerMsg, PricerMsg, PricerMsg, _]</code> - shapes client-bound traffic (we are going to look at it in details in further
+            sections)
+        </li>
+        <li><a href="#code/app/backend/distributor/DistributorEndpointStage.scala" class="shortcut">DistributorEndpointStage</a>: <code>Flow[PricerMsg, PricerMsg, _]</code> - main processing stage,
+            where we process incoming messages and produce outgoing messages
+        </li>
+    </ol>
+    <p>
+        When a client connects to the provided endpoint, we create a new materialized instance of the stream based on
+        the above specification. This stream will be running in isolation from any other stream in the system, which is
+        very important. For instance, if one client is too slow processing the messages, or if anything goes wrong with
+        the underlying stream attached to a particular connection, that does not affect any other live stream in the
+        system.
+    </p>
+</div>
+
+<div>
+    <h2>Crossing JVM boundaries</h2>
+    <p>
+        The materialized stream is local to the JVM where the materialization happened. There are several <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-integrations.html">integration solutions</a>
+        that Akka Streams provides out-of-the box. For
+        example, it is possible to have <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-integrations.html#Integrating_with_Actors">remote actors as a custom Sink or Source</a>, but reliability and backpressure
+        aspects are not covered out-of-the-box, and you need to come up with your own solution that fits your
+        requirements.
+    </p>
+
+    <p>
+        One of the options to extend the stream beyond the boundaries of a JVM is a TCP Stream. TCP endpoints (both
+        client and a server) are provided out-of-the box and they provide full support for backpressure.
+    </p>
+
+    <p>
+        Open <a href="#code/app/backend/distributor/PricerConnectionManager.scala" class="shortcut">PricerConnectionManager.scala</a>
+    </p>
+
+    <p>
+        This actor constructs a flow specification that, once materialized, connects to the provided TCP endpoint, and
+        if successful, attaches it to the processing pipeline. If connection can not be established of flow terminates
+        (as a result of the underlying connection termination, for example), it retries with another endpoint.
+    </p>
+    <p>
+        The fundamental approach is similar to the one we've seen before and some code should look
+        familiar. Similar to the websocket connection listener, we are provided with the <code>Flow[ByteString, ByteString, _]</code>,
+        but this time representing an outgoing connection - input port will receive the outgoing data and output
+        port will produce the incoming data from the remote destination. The processing pipeline attached to the flow is also
+        constructed out of the individual stages.
+    </p>
+    <p>
+        Here is how it all fits together:
+    </p>
+      <pre><code>     val processingPipeline = FramingStage() atop CodecStage() join PricerStreamEndpointStage(self)
+      Tcp().outgoingConnection(connectTo.host, connectTo.port) join processingPipeline run() onComplete {
+        case Success(c) => self ! SuccessfullyConnected(c)
+        case Failure(f) => self ! ConnectionAttemptFailed()
+      }
+</code></pre>
+    <p>
+        To break it down:<br/>
+        <code>Tcp().outgingConnection(connectTo.host, connectTo.port)</code> produces the <code>Flow[ByteString,
+        ByteString, Future[OutgoingConnection]]</code> which we close with the pipeline flow that consists of three
+        stages. This produces a <code>RunnableGraph</code>. Next we <code>run()</code> the RunnableGraph instance which produces the
+        materialised value of <code>Future[OutgoingConnection]</code> (<a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-quickstart.html#materialized-values">Learn more about materialized values</a>). Finally we
+        attach the async handler to the future with <code>onComplete</code>. Under the covers, Akka Streams will attempt
+        to open TCP connection to the provided destination and, if successful, the data will start flowing through the
+        stages.
+    </p>
+
+    <p>At this point, we have two independent streams running - one attached to the client websocket connection, and one connected to the remote Pricer.
+    We are going to see how these two streams can be linked in the following sections of the tutorial.</p>
+</div>
+
+<div>
+    <h2>Reusing stream stages</h2>
+
+    <p>
+        In this section we are going to take a quick look at how server-side code can be reused in the implementation
+        the client-side and vice-versa. This may be very useful if we have control over both client and server side of the integration point.
+    </p>
+
+    <p>
+        Open <a href="#code/app/backend/pricer/Pricer.scala" class="shortcut">Pricer.scala</a>
+    </p>
+
+    <p>
+        You should recognize the pattern: in response to an incoming connection we receive a <code>Flow</code> that represents the
+        connection and we close it with another <code>Flow</code>, representing a processing pipeline.
+    </p>
+
+    <p>
+        <code>Tcp().bind</code> produces a
+        <code>Source[TcpConnection]</code>, which is effectively a stream of incoming connections (<code>Source</code> is a shape of
+        a stage, with only one output and no inputs. Similarly, a stage with only one input and no outputs called <code>Sink</code>).
+        For each incoming connection we are materializing a new flow and attaching it to the provided processing
+        pipeline:
+    </p>
+      <pre><code>   Tcp().bind(host, port) runForeach { connection =>
+      connection handleWith (PricePublisherFlowStage(serverId) join (CodecStage().reversed atop FramingStage().reversed))
+    }
+</code></pre>
+
+    <p>
+        To break it down:<br/>
+        <code>Tcp().bind(host, port)</code> is a <code>Source[TcpConnection]</code> which requires a <code>Sink[TcpConnection]</code>
+        to be materializable. <code>runForeach(f)</code> is a shortcut for <code>runWith(Sink.foreach(f))</code>, where
+        <code>f</code> is a function of <code>TcpConnection => Unit</code>. <code>connection.handleWith(..)</code> works
+        the same as <code>upgrade.handleMessages(..)</code> from Akka HTTP - it takes a <code>Flow</code> and materializes the
+        stream.
+    </p>
+
+    <p>
+        Finally, let's have a closer look at the processing pipeline:
+    </p>
+      <pre><code>PricePublisherFlowStage(serverId) join (CodecStage().reversed atop FramingStage().reversed)</code></pre>
+
+    <p>
+        Take <code>CodecStage</code> for example. We have already used it in <a
+            href="#code/app/backend/distributor/PricerConnectionManager.scala" class="shortcut">PricerConnectionManager.scala</a>. To
+        remind you, this is how it was used:
+    </p>
+      <pre><code>val processingPipeline = FramingStage() atop CodecStage() join PricerStreamEndpointStage(self)</code></pre>
+    <p>
+        For messages from client to Price Engine the codec would take an <code>PricerMsg</code> and encode it
+        into <code>ByteString</code>. For the messages flowing in the opposite direction the opposite happens - <code>ByteString</code>
+        is decoded back into the <code>PricerMsg</code>. In the <code>PriceEngine</code> we need to do pretty
+        much the same, the only difference is that we need to decode (<code>ByteString</code> to <code>PricerMsg</code>)
+        the messages flowing from client to the Price Engine and encode the messages in the opposite direction. The
+        <code>CodecStage</code> should do the job, but the two flows (each handling one direction) should be flipped.
+        The <code>reversed</code> method on <code>BidiFlow</code> does exactly that. Once reversed, the stages can be
+        put on top of each other in the reversed order. The resulting flow here is the reversed flow.
+    </p>
+
+    <p>
+        Note, however, that not all BidiFlow implementations can be reversed. For instance, a set of inbound messages
+        may be different from the set of the outbound messages. In this case, the implementation covers the complete set
+        of messages in both directions. Check the <a href="#code/app/backend/shared/CodecStage.scala" class="shortcut">CodecStage.scala</a>.
+        <code>toBytes</code> and <code>fromBytes</code> convert both service-bound and client-bound messages, even
+        thought that when plugged in, only partial set is really needed.
+    </p>
+</div>
+
+<div>
+    <h2>Linking live streams</h2>
+
+    <p>
+        So far we covered two parts of the complete end-to-end flow: one attached to the client websocket connection,
+        and another one connected to the Pricer via TCP, as shown on the diagram below:
+    </p>
+
+    <p>
+        <img src="tutorial/img/disconnected.png"/>
+    </p>
+
+    <p>
+        There are several ways of how the streams can be connected. In the scope of this tutorial we are
+        going to look at two different approaches. Note, that these approaches may be a good fit in one context and not
+        suitable in others.
+    </p>
+
+    <h3>Stream discovery</h3>
+
+    <p>
+        To start with, we need a way to discover the other stream's endpoint. In this example we have a simple shared
+        registry-based solution, where each side will register its locations and registry will notify the other parties
+        of the changes.
+    </p>
+
+    <p>
+        See <a href="#code/app/backend/distributor/StreamRegistry.scala" class="shortcut">StreamRegistry.scala</a> for reference
+        implementation.
+    </p>
+
+    <p>
+        There are several options of how the stream can be exposed. For example, one approach would be to use
+        <code>ActorSubscriber</code> and <code>ActorPublisher</code>, that could expose their <code>ActorRef</code>s
+        once the flow is live. Another approach is to use the <code>GraphStage</code>, which also has a capability to
+        expose itself to the outside of the stream. The tutorial demonstrates the latter option.
+    </p>
+
+    <h3>Stream sharing</h3>
+
+    <p>
+        Reactive FX allows users to subscribe to any currency pair price stream. Once subscription is live,
+        Pricer is going to produce 500 updates/second (this is the default setting, and can be adjusted in the
+        <a href="#code/conf/backend.conf" class="shortcut">backend.conf</a>, <code>updates-per-ccy-per-sec</code>.)
+        Now consider what happens whtn ten clients subscribed to the same ten currency pairs each. If we create a
+        dedicated stream to the Pricer for each connected client, this would result in 50000 updates/second
+        between the Distributor and Pricer components. To optimise this, we want to subscribe only to the unique
+        currency pairs with the Pricer and then locally distribute the prices to all subscribed streams.
+    </p>
+
+    <p>
+        In the <a href="#code/app/backend/distributor/PricerStreamEndpointStage.scala" class="shortcut">PricerStreamEndpointStage.scala</a>,
+        <code>StreamRequest</code> messages are forwarded to the Pricer only if it is the first subscription for
+        the given currency pair. Otherwise, subscription is registered and request is swallowed (the code is simplified):
+    </p>
+    <pre><code>   private def onMessage(x: (ActorRef, Any)): Unit = x match {
+      case (_, Payload(ref, m@StreamRequest(cId))) =>
+        if (!openSubscriptions.contains(cId)) {
+          pendingToPricer = pendingToPricer :+ StreamHead(Some(ref), m)
+          pushToPricer()
+        }
+        if (!openSubscriptions.get(cId).exists(_.contains(ref)))
+          openSubscriptions += cId -> (openSubscriptions.getOrElse(cId, List()) :+ ref)
+    }
+</code></pre>
+    <p>
+        At the same time, when price update is received we forward it to each reference that previously subscribed to that currency pair:
+    </p>
+    <pre><code>    setHandler(in, new InHandler {
+      override def onPush(): Unit = {
+        grab(in) match {
+          case m@PriceUpdate(cId, _, _) => openSubscriptions get cId foreach (_.foreach(_ ! m))
+          case m: Ping => activeDistributorStreams foreach (_ ! m)
+        }
+        pull(in)
+      }
+    })
+</code></pre>
+</div>
+
+<div>
+    <h2>Flow control strategies</h2>
+
+    <p>
+        In the next few sections we are exploring several approaches for implementing flow control. There are many reasons
+        why you would want to have some kind of flow control in the stream - for example you may need to ensure that fast
+        producer/slow consumer scenario is handled properly, that network bandwidth capacity requirements are met, to implement
+        prioritized messaging or to prevent data flow spikes. There is no a single solution that fits all scenarios.
+        Each context is unique, and each may require a custom designed solution. Chances are, you may want to apply different
+        strategies to different stages in the stream design.
+    </p>
+
+    <p>
+        The specific approaches we are going to cover in the following sections are:
+    </p>
+    <ul>
+        <li>websocket outbound traffic shaping</li>
+        <li>manual backpressure implementation, for pricer-bound traffic</li>
+        <li>detached consumer with a fast producer, for client-bound traffic</li>
+    </ul>
+</div>
+
+<div>
+    <h2>Websocket traffic shaping</h2>
+
+    <p>
+        Open <a href="#code/app/backend/distributor/ShapingStage.scala" class="shortcut">ShapingStage.scala</a>.
+    </p>
+
+    <p>
+        We will start with a quick overview of how the <code>GraphStage</code>s work in general.
+    </p>
+
+    <p>
+        In a nutshell, there are two parts to it. The first one is a 'specification' part. It defines the shape of the stage:
+    </p>
+      <pre><code> val in: Inlet[PricerMsg] = Inlet("Inbound")
+  val out: Outlet[PricerMsg] = Outlet("ShapedOutbound")
+
+  override val shape: FlowShape[PricerMsg, PricerMsg] = FlowShape(in, out)
+</code></pre>
+    <p>
+        The second part is the implementation:
+    </p>
+      <pre><code>override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) { ... }</code></pre>
+    <p>
+        The logic instance will be created only during the materialization step.
+    </p>
+
+    <p>
+        In the logic implementation, you need to set up handlers for all exposed ports. In this example, we need to define
+        one for 'in' and one for 'out':
+    </p>
+      <pre><code>   setHandler(in, new InHandler {
+      override def onPush(): Unit = {
+        maybeNext = Some(grab(in))
+        forwardThrottled()
+      }
+    })
+
+    setHandler(out, new OutHandler {
+      override def onPull(): Unit = forwardThrottled()
+    })
+</code></pre>
+
+    <p>
+        In general, this is how it works: stage requests data from the upstream by calling <code>pull(in)</code>.
+        Upstream pushes some data and as a result the <code>onPush</code> method is called. The next pushed message can
+        be retrieved by calling <code>grab(in)</code>, and then next element can be requested by calling the <code>pull(in)</code>.
+        This is one side of the flow - the 'consuming' side. The 'producing' side is waiting for the initial pull from
+        the downstream. Once <code>onPull</code> is called, next element can be 'produced' by calling <code>push(out,
+        ..)</code>. Note, 'consuming' and 'producing' sides are detached. You can take elements from consuming side and push them into producing side, therefore connecting the two, but
+        you don't have to.
+    </p>
+
+    <p>
+        To initiate the upstream flow we start with calling the <code>pull(in)</code> (the code is simplified):
+    </p>
+
+      <pre><code>   override def preStart(): Unit = {
+      pull(in)
+    }
+</code></pre>
+
+    <p>
+        The stage may expose a reference to self as an <code>ActorRef</code>, which can be obtained by calling <code>getStageActorRef(handler)</code> once
+        the stage has been started. The reference can be used to watch other actors (there is no actor context inside the
+        stage, so this instance is a special kind, which provides this extra facility) and be used by other components
+        to send messages into the stage. Stage will process all incoming messages in a thread-safe way, using the
+        handler provided as a parameter to the <code>getStageActorRef(handler)</code> call.
+    </p>
+
+    <p>
+        GraphStage provides timer facility:
+    </p>
+
+      <pre><code>   override def preStart(): Unit = {
+      schedulePeriodically(TokensTimer, TokenReplenishInterval)
+    }
+
+    override protected def onTimer(timerKey: Any): Unit = { ... }</code></pre>
+    <p>
+        Once timer is initialised, <code>onTimer</code> will be called with timerKey provided as a parameter
+        (TokensTimer in this example). Timers can be cancelled with <code>cancelTimer(..)</code>. <br/>
+    </p>
+
+    <p>
+        Our ShapingStage implementation is a variation of a well-known token-based solution. This is a quick overview of the algorithm:
+        messages are pushed as long as there are tokens available at that point in time. One token is consumed every
+        time the message is pushed:
+    </p>
+    <pre><code>   def forwardThrottled() = if (isAvailable(out)) maybeNext foreach { next =>
+      if (tokens > 0) {
+        pull(in)
+        push(out, next)
+        maybeNext = None
+        if (tokens > 0) tokens -= 1
+      }
+    }
+</code></pre>
+    <p>
+        Then, periodically, tokens are refreshed:
+    </p>
+    <pre><code>   override protected def onTimer(timerKey: Any): Unit = {
+      val now = System.currentTimeMillis()
+      val elapsedTime = if (lastTokensIssuedAt == 0) TokenReplenishInterval.toMillis else now - lastTokensIssuedAt
+      tokens = (elapsedTime * TokenReplenishInterval.toMillis / TokensCount).toInt
+      lastTokensIssuedAt = now
+      forwardThrottled()
+    }
+</code></pre>
+    <p>
+        Depending on the required behavior, the
+        exact implementation may vary. For example, you may choose to replenish tokens every 100 ms, or every minute, or
+        you may choose to take into account the size of the messages and so on.
+    </p>
+</div>
+
+<div>
+    <h2>Manual backpressure control</h2>
+
+    <p>
+        You may come across a scenario when you need to channel messages between two stages which are not parts of the
+        same stream, and out-of-the-box Akka Stream solutions would not fit. For example, you may need to dynamically
+        connect two live streams with end-to-end backpressure support. In this case custom flow control protocol
+        needs to be implemented.
+    </p>
+
+    <p>
+        In this tutorial we are demonstrating a very simple manual backpressure control implementation, and suggest a few
+        options for further improvements if required. Conceptually it is a simplified version of the solution that
+        powers the backpressure control logic in the Akka Streams. Understanding the mechanics of the implementation
+        will contribute to better understanding of the built-in mechanisms in the framework.
+    </p>
+
+    <p>
+        The high-level idea is the following: When consumer is ready to receive more elements, it sends a message to the
+        producer, communicating a demand of N elements. Producer keeps track of the downstream demand, and when another
+        element is available and demand is > 0, it pushes the element downstream, consuming one demand point. If there is
+        no demand no further messages will be pushed until another demand notification message is received.
+    </p>
+
+    <p>
+        In this example we are looking at a so-called one-by-one request
+        strategy (Akka Stream equivalent - <code>OneByOneRequestStrategy</code>). As the name suggests, consumer always
+        requests a demand of 1. Therefore messages are pulled/pushed one by one.
+    </p>
+
+    <p>
+        The reference implementation is in <a href="#code/app/backend/distributor/PricerStreamEndpointStage.scala" class="shortcut">PricerStreamEndpointStage.scala</a>
+        (a consumer side) and <a href="#code/app/backend/distributor/DistributorEndpointStage.scala" class="shortcut">DistributorEndpointStage.scala</a>, <code>ManuallyControlledStreamProducer</code>
+        (a producer side).
+    </p>
+
+    <p>
+        Let's see how it works.
+    </p>
+
+    <p>
+        Open <a href="#code/app/backend/distributor/DistributorEndpointStage.scala"
+                class="shortcut">DistributorEndpointStage.scala</a> and see
+        <code>ManuallyControlledStreamProducer</code> trait.
+    </p>
+
+    <p>
+        First, the trait has two dependencies:
+    </p>
+      <pre><code> def in: Inlet[PricerMsg]
+  def selfRef: StageActorRef
+</code></pre>
+    <p>
+        We nee the 'in' port to pull the elements, and self reference for monitoring the link
+        lifecycle (using GraphActorRef watch/unwatch facility), and also we will need to include the self ref into our
+        payloads to the downstream
+    </p>
+
+    <p>
+        Next, we need to keep track the current location of the Pricer stream, an indicator of the demand, and a queue of
+        pending messages:
+    </p>
+
+      <pre><code> private var pricerStreamRef: Option[ActorRef] = None
+  private var demand  = 0
+  private var pricerMessageQueue: Queue[PricerMsg] = Queue()
+</code></pre>
+    <p>
+        Next we need to install a handler for the input port:
+    </p>
+
+      <pre><code> setHandler(in, new InHandler {
+    override def onPush(): Unit = forwardRequestToPriceEngine()
+  })
+
+  @tailrec private def forwardRequestToPriceEngine(): Unit =
+    if (hasDemand) pricerStreamRef match {
+      case Some(target) =>
+        takeQueueHead() orElse takeStreamHead() match {
+          case Some(msg) =>
+            target ! StreamLinkApi.Payload(selfRef, msg)
+            demand -= 1
+            forwardRequestToPriceEngine()
+          case _ =>
+        }
+      case _ =>
+    }
+</code></pre>
+    <p>
+        If there is a demand, and location of the pricer is known, we attempt to drain the queue first following by the
+        stream head, and if any element is available we send it to the pricer stream endpoint. This would consume a demand point.
+    </p>
+
+    <p>
+        Next, we need to consume the demand signals from the downstream:
+    </p>
+    <pre><code>   case StreamLinkApi.Demand(sender) =>
+      if (pricerStreamRef.isEmpty) {
+        selfRef.watch(sender)
+        pricerStreamRef = Some(sender)
+        pricerMessageQueue = Queue(openSubscriptions.map(x => StreamRequest(x)).toSeq: _*)
+      }
+      demand = 1
+      forwardRequestToPriceEngine()
+</code></pre>
+
+    <p>
+        Here we are going to use the very first Demand signal to learn about the location of the downstream. When we
+        discover a new location, we will start watching it so we know when it terminates, and also going to replace the
+        queue of pending messages with subscription requests on behalf of the upstream client. Next we account the demand
+        and executing the push logic which will start sending the messages downstream.
+    </p>
+
+    <p>
+        Finally, when the downstream terminates, we need to 'forget' about the current location, reset the demand and clean the queue:
+    </p>
+    <pre><code>   case Terminated(ref) =>
+      pricerMessageQueue = Queue()
+      pricerStreamRef = None
+      demand = 0
+</code></pre>
+
+    <p>
+        The implementation can be easily improved by implementing watermark demand strategy, when a demand of M is
+        requested when current demand state is N or below. The Akka Streams equivalent is <code>WatermarkRequestStrategy</code>.
+    </p>
+
+</div>
+
+<div>
+    <h2>Dealing with fast producers</h2>
+
+    <p>
+        On the client-bound side of the flow we have to deal with a high-velocity data stream. If any of the connected
+        clients can't keep up with the rate of the updates this should not affect any other client or Pricer in any way.
+        Also, to remind you, we made an assumption that the client is only interested in the very latest price update for a given currency pair at any
+        point in time. Therefore, if there are more than one price ticks available for the same currency pair, we have to deliver
+        only the latest one and can drop all the previous ones.
+    </p>
+
+    <p>
+        The reference implementation is in PricerStreamEndpointStage (a producer) and DistributorEndpointStage (a
+        consumer). Let's break it down.
+    </p>
+
+    <p>
+        Open <a href="#code/app/backend/distributor/PricerStreamEndpointStage.scala" class="shortcut">PricerStreamEndpointStage.scala</a>.
+    </p>
+
+    <p>
+        We are keeping track of all live websocket streams and their active subscriptions:
+    </p>
+      <pre><code>   var activeDistributorStreams: Set[ActorRef] = Set()
+    var openSubscriptions: Map[Short, List[ActorRef]] = Map()
+</code></pre>
+
+    <p>
+        When a price update is received we send it to all streams that has an interest in that currency pair. If it is a
+        ping request, we send it to all active streams.
+    </p>
+      <pre><code>   setHandler(in, new InHandler {
+      override def onPush(): Unit = {
+        grab(in) match {
+          case m@PriceUpdate(cId, _, _) => openSubscriptions get cId foreach (_.foreach(_ ! m))
+          case m: Ping => activeDistributorStreams foreach (_ ! m)
+        }
+        pull(in)
+      }
+    })
+</code></pre>
+
+    <p>
+        Now open <a href="#code/app/backend/distributor/DistributorEndpointStage.scala" class="shortcut">DistributorEndpointStage.scala</a>
+        and see <code>FastStreamConsumer</code> trait.
+    </p>
+
+    <p>
+        This is the part of the stream attached to the client websocket connection on the other end. When the price update is received here, and
+        output port is available to take the next element, we send the update. Otherwise we keep it in the <code>pendingClientUpdates</code>
+        collection until the downstream pulls. Similar logic applied to ping requests.
+    </p>
+
+    <pre><code> protected val clientBoundMessage: PartialFunction[Any, Unit] = {
+    case u: PriceUpdate =>
+      if (!pendingClientUpdates.contains(u.ccyPairId)) clientUpdatesQueue = clientUpdatesQueue enqueue u.ccyPairId
+      pendingClientUpdates += u.ccyPairId -> u
+      forwardUpdateToClient()
+    case u: Ping if pendingPing.isEmpty =>
+      pendingPing = Some(u)
+      forwardPingToClient()
+    case u: Ping =>
+  }
+</code></pre>
+
+    <p>
+        In the current context, DistributorEndpointStage should be able to keep up with the inbound flow and dynamically
+        adapt it to the client consumption rate. However, this kind of implementation will require extensive performance
+        testing and operational monitoring - to understand the operational limits and to ensure the limits are not
+        exceeded.
+    </p>
+</div>
+
+<div>
+    <h2>OS-level TCP buffers</h2>
+    <p>
+        When TCP-based endpoint is used in the stream design you need to consider inbound and outbound OS-level TCP
+        buffers on both ends of the connection. Depending on your environment configuration they may have a significant
+        effect on the behaviour of the system.
+    </p>
+
+    <p>
+        Consider the scenario with a websocket client with a slow TCP connection. Server will be sending data to the
+        client at full speed until the TCP buffers are full, and only then the backpressure kicks in.
+    </p>
+
+    <p>
+        The easiest way to get a feeling for they way it works and affects the design is to see it in action.
+    </p>
+
+    <p>
+        start the ip_relay tool :
+    </p>
+    <pre><code>ip_relay.pl 8081:localhost:8080</code></pre>
+    <p>
+        and in browser go to <i>localhost:9000?port=8081</i>. This would change the websocket port the UI is going to
+        connect to. This time it would connect to the ip_relay instance which is going to redirect all the traffic to
+        the port 8080.
+    </p>
+
+    <p>
+        Subscribing to one currency pair. Note the metrics in the logs:
+    </p>
+      <pre><code>[info] 2016-02-27 19:09:36.530 Metrics: type=GAUGE, name=pricer.1.msgOut, value=498
+ [info] 2016-02-27 19:09:36.530 Metrics: type=GAUGE, name=websocket.1.msgOut, value=497
+</code></pre>
+
+    <p>
+        Now, in ip_relay console run the following:
+    </p>
+      <pre><code>set bandwidth 1000</code></pre>
+    <p>
+        This would limit the bandwidth to 1kB/s. You should see the immediate effect on the client.
+    </p>
+    <p>
+        Now look at the stats in the log again - you will notice that the websocket msgOut rate stays at 500/s for some
+        time, before dropping to 0. At this point the TCP buffers are full. Eventually the rate jumps back to 500 and
+        then back to 0 almost immediately - you observe the backpressure in action - when buffers are freed, flow
+        resumes and with the current update arrival rate they filled in instantly.
+    </p>
+
+    <p>
+        Now, keeping web page open, lift the limitation by run the following in the ip_relay console, and observe what happens
+        on the client:
+    </p>
+      <pre><code>set bandwidth 0</code></pre>
+    <p>
+        The traffic will resume at normal speed. You should be able to see the immediate effect - prices will spin very
+        fast for a second or so and they will go back to a regular pace. This spike happens because the shaping is
+        applied before the transport layer, and if client becomes irresponsive for a period of time, the messages will
+        be queued in the tcp buffer on the sending side and then produce a spike once client becomes available.
+    </p>
+</div>
+
+<div>
+    <h2>Fault tolerance and HA</h2>
+
+    <p>
+        In this section we list a number of possible failure scenarios and review some options to address them.
+    </p>
+
+    <p>
+        Some of the possible points of failure are
+    </p>
+    <ol>
+        <li>Client connection terminates</li>
+        <li>Client connection becomes slow</li>
+        <li>Distributor node fails</li>
+        <li>Distributor to Pricer connection terminates</li>
+        <li>Pricer node fails</li>
+    </ol>
+
+    <h3>Client connection terminates.</h3>
+
+    <p>
+        Each client connection is handled with a dedicated stream which dynamically attaches to the price engine stream
+        endpoint. The failure of an individual connection results in the underlying dedicated stream being terminated.
+        This event does not have any effect on any other running stream in the system. When the stream is terminated,
+        the event is captured by the Pricer (see <a href="#code/app/backend/distributor/PricerStreamEndpointStage.scala"
+                                                          class="shortcut">PricerStreamEndpointStage.scala</a>) and that
+        destination is removed from the distribution list:
+    </p>
+    <pre><code>     case (_, Terminated(ref)) =>
+        logger.info(s"Broken link with $ref")
+        pendingToPricer = pendingToPricer.filterNot(_.maybeRef.contains(ref))
+        activeDistributorStreams -= ref
+        openSubscriptions = openSubscriptions map {
+          case (cId, subscribers) if subscribers.contains(ref) => cId -> subscribers.filterNot(_ == ref)
+          case other => other
+        }
+</code></pre>
+    <p>When client reconnects, a brand new stream is started and re-attached at the Pricer stream side:</p>
+    <pre><code>     case (_, DistributorStreamRef(ref)) =>
+        logger.info(s"Linked with distributor stream at $ref")
+        activeDistributorStreams += ref
+        self.watch(ref)
+        ref ! Demand(self)
+</code></pre>
+
+    <h3>Websocket connection becomes slow</h3>
+
+    <p>
+        If for any reason client is unable to keep up with the incoming rate of updates, that should not affect any
+        other client in the system nor the source of the data. This is achieved with a flow control strategy put in
+        place at the point when client-side stream receives a price update from the source. The update is forwarded to
+        the client if there is a demand otherwise the local snapshot of the price is updated and the message is dropped.
+        When downstream is available to receive more elements, the latest snapshot is sent to the client. You may want
+        to review the <i>Dealing with fast producers</i> section where this mechanism is explained in
+        details.
+    </p>
+
+    <h3>Distributor node failure</h3>
+
+    <p>
+        When the entire distributor node fails, we would rely either on the web client to automatically fail-over to
+        another distributor endpoint, or on an additional component on the server side (such as a load balancer) to perform the
+        switch.
+    </p>
+
+    <h3>Distributor to Pricer connection terminates</h3>
+
+    <p>
+        If connection with the pricer terminates, it should be automatically restored. From the user experience
+        perspective, the outage should be as short as possible. In the reference implementation this is achieved by
+        detaching Price stream from the client stream, and dynamically rebuilding the end-to-end data flow once stream endpoints
+        become available. This could be further improved, if we could keep multiple active Price streams. Then the
+        outage could be potentially eliminated altogether.
+    </p>
+
+    <p>For the implementation of the auto-reconnect solution refer to <a href="#code/app/backend/distributor/PricerConnectionManager.scala"
+                                                                         class="shortcut">PricerConnectionManager.scala</a>.</p>
+
+    <h3>Pricer node fails</h3>
+
+    <p>
+        Similar to the scenario above, this would result in the dropped TCP connection and terminated Pricer stream. The
+        reference implementation will try to reconnect to the same, followed by other available endpoints.
+    </p>
+
+</div>
+
+</body>
+
+
+</html>

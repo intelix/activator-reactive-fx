@@ -4,16 +4,16 @@ import akka.stream.BidiShape
 import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.util.ByteString
 import backend._
-import backend.PricerApi._
+import backend.PricerMsg._
 
 object CodecStage {
   def apply() = BidiFlow.fromGraph(FlowGraph.create() { b =>
     val in = b.add(Flow[ByteString].map(fromBytes))
-    val out = b.add(Flow[PricerApi].map(toBytes))
+    val out = b.add(Flow[PricerMsg].map(toBytes))
     BidiShape.fromFlows(in, out)
   })
 
-  private def toBytes(msg: PricerApi): ByteString = msg match {
+  private def toBytes(msg: PricerMsg): ByteString = msg match {
     case StreamRequest(id) => ByteString("r:" + id)
     case StreamCancel(id) => ByteString("c:" + id)
     case PriceUpdate(id, a, sId) => ByteString("u:" + id + ":" + a + ":" + sId)
@@ -22,7 +22,7 @@ object CodecStage {
     case KillServerRequest() => ByteString("k")
   }
 
-  private def fromBytes(bytes: ByteString): PricerApi = {
+  private def fromBytes(bytes: ByteString): PricerMsg = {
     val s = bytes.utf8String.trim
     s.charAt(0) match {
       case 'k' =>
