@@ -6,6 +6,9 @@ import akka.stream.stage.{Context, PushStage, SyncDirective}
 import backend.PricerMsg
 import backend.utils.{Metrics, SimpleThroughputTracker}
 
+/**
+  * Calculates throughput stats
+  */
 object MetricsStage {
 
   def apply(connectionId: Int) = BidiFlow.fromGraph(FlowGraph.create() { b =>

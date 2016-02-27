@@ -53,6 +53,9 @@ object PricerConnectionManager {
 
 }
 
+/**
+  * Manages connection with Pricer endpoint
+  */
 private class PricerConnectionManager(ref: ActorSelection, endpoints: List[Endpoint]) extends FSM[State, StateData] with StrictLogging {
 
   implicit val sys = context.system

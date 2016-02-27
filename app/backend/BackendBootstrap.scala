@@ -7,6 +7,9 @@ import backend.distributor.{Distributor, PricerConnectionManager, StreamRegistry
 import com.typesafe.config.ConfigFactory
 import play.api.{Application, GlobalSettings}
 
+/**
+  * Bootstrap for all components.
+  */
 object BackendBootstrap extends GlobalSettings {
 
   override def onStart(app: Application): Unit = {

@@ -5,6 +5,9 @@ import akka.stream.io.Framing
 import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.util.ByteString
 
+/**
+  * Basic TCP Framing stage
+  */
 object FramingStage {
   def apply() = BidiFlow.fromGraph(FlowGraph.create() { b =>
     val delimiter = ByteString("\n")

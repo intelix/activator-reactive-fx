@@ -10,6 +10,9 @@ import com.typesafe.scalalogging.StrictLogging
 import scala.collection.JavaConversions._
 import scala.language.postfixOps
 
+/**
+  * Pricer component accepts TCP connections from the clients and produces price streams.
+  */
 object Pricer {
   def start()(implicit sys: ActorSystem) = {
     implicit val cfg = sys.settings.config

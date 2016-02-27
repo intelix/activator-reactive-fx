@@ -5,6 +5,9 @@ import akka.stream.BidiShape
 import akka.stream.scaladsl.{BidiFlow, Flow, FlowGraph}
 import akka.util.ByteString
 
+/**
+  * Basic websocket framing stage
+  */
 object WebsocketFrameStage {
   def apply() = BidiFlow.fromGraph[Message, ByteString, ByteString, Message, Unit](FlowGraph.create() { b =>
     val in = b.add(Flow[Message].map {

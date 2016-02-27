@@ -18,6 +18,9 @@ object ShapingStage {
 
 }
 
+/**
+  * Basic traffic shaping stage
+  */
 private class SimpleThrottledFlow(msgSec: Int) extends GraphStage[FlowShape[PricerMsg, PricerMsg]] {
   val in: Inlet[PricerMsg] = Inlet("Inbound")
   val out: Outlet[PricerMsg] = Outlet("ShapedOutbound")

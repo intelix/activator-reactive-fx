@@ -1,5 +1,8 @@
 package backend
 
+/**
+  * Pricer dialect.
+  */
 trait PricerMsg
 
 object PricerMsg {

@@ -3,6 +3,9 @@ package backend.distributor
 import akka.actor.ActorRef
 import backend.PricerMsg
 
+/**
+  * Internal API for stream linking
+  */
 object StreamLinkApi {
 
   case class DistributorStreamRef(ref: ActorRef)

@@ -6,6 +6,9 @@ import akka.util.ByteString
 import backend._
 import backend.PricerMsg._
 
+/**
+  * Conversion between websocket and pricer dialects.
+  */
 object CodecStage {
   def apply() = BidiFlow.fromGraph(FlowGraph.create() { b =>
     val in = b.add(Flow[ByteString].map(fromBytes))
