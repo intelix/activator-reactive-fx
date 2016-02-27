@@ -13,3 +13,10 @@ The topics covered in this tutorial are:
 * How to automatically recover end-to-end flow, with a minimal impact on the user experience
 * How to scale the application to improve availability or in response to a higher demand
 
+## Run in Activator
+
+Clone the repo and open from the Activator UI
+
+## Run from SBT
+
+Clone the repo, navigate to the folder and run `sbt run`
