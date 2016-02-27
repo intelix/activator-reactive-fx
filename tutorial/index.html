@@ -8,22 +8,11 @@
 <div>
     <h2>Introduction</h2>
     <p>Akka Streams framework provides basic building blocks for implementing non-blocking back-pressured streaming
-        systems. This tutorial is presented in a 'how-to' format that covers a number of common challenges you may come
-        across when working with Akka Streams.</p>
-
-    <p>In this tutorial we are looking at -</p>
-    <ul>
-        <li>How to implement a light-weight, fast and scalable websocket endpoint</li>
-        <li>How to create inter-process back-pressured streams</li>
-        <li>How to subscribe to live streams of data</li>
-        <li>How to deal with very fast data sources</li>
-        <li>How to automatically recover end-to-end flow, with a minimal impact on the user experience</li>
-        <li>How to scale the application to improve availability or in response to a higher demand</li>
-    </ul>
+        systems. This tutorial shows how the framework can be used to solve real world problems.</p>
 
     <p>
-        Reactive FX is a sample application designed to provide a real-world like context for the problems and
-        demonstrate some possible solutions. The application represents a Forex dealer dashboard, which interfaces with
+        Reactive FX is a sample application that provides a context for the tutorial. It represents a Forex dealer dashboard,
+        which interfaces with
         a remote pricing engine and allows users to subscribe to price streams through the web interface.
     </p>
 
@@ -35,6 +24,16 @@
         is possible to shut down the current live source of data with 'Kill Pricer' button. When the current source
         dies, the system is expected to automatically switch to another source if there is one available.
     </p>
+
+    <p>The topics covered in this tutorial are:</p>
+    <ul>
+        <li>How to implement a light-weight, fast and scalable websocket endpoint</li>
+        <li>How to create inter-process back-pressured streams</li>
+        <li>How to subscribe to live streams of data</li>
+        <li>How to deal with very fast data sources</li>
+        <li>How to automatically recover end-to-end flow, with a minimal impact on the user experience</li>
+        <li>How to scale the application to improve availability or in response to a higher demand</li>
+    </ul>
 
     <p>For the purpose of this tutorial we made the following assumptions:</p>
     <ul>
