@@ -4,7 +4,7 @@ This tutorial shows how Akka Streams can be used to solve real world problems
 
 Reactive FX is a sample application that provides a context for the tutorial. It represents a Forex dealer dashboard, which interfaces with a remote pricing engine and allows users to subscribe to price streams through the web interface.
 
-!(https://raw.githubusercontent.com/intelix/activator-reactive-fx/master/tutorial/img/screenshot1.png)
+![screenshot](https://raw.githubusercontent.com/intelix/activator-reactive-fx/master/tutorial/img/screenshot1.png "screenshot")
 
 
 The topics covered in this tutorial are:
