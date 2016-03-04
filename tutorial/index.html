@@ -11,10 +11,19 @@
         systems. This tutorial shows how the framework can be used to solve real world problems.</p>
 
     <p>
-        Reactive FX is a sample application that provides a context for the tutorial. It represents a Forex dealer dashboard,
-        which interfaces with
-        a remote pricing engine and allows users to subscribe to price streams through the web interface.
+        It is assumed that reader has basic understanding of Akka and Akka Streams. If this is your first introduction
+        to Akka Stremas, it is recommended to review the initial sections of the official documentation, in particular
+        <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-flows-and-basics.html#Stream_Materialization">Basics and working with Flows</a>
     </p>
+
+    <p>
+        Reactive FX is a sample application that provides a context for the tutorial. It represents a Currency trader dashboard,
+        which interfaces with a remote pricing engine and allows users to subscribe to currency price updates through the web interface.
+        Currency pricing presents a good case for a streaming solution in a niche and interesting problem space. In the electronic trading
+        prices are often delivered as a stream of price updates, and rate of update may be reaching 100s updates/second per currency pair,
+        yielding high-velocity environment. Low latency is another important trait that these kind of systems share.
+    </p>
+
 
     <img src="tutorial/img/screenshot1.png"/>
 
@@ -35,20 +44,22 @@
         <li>How to scale the application to improve availability or in response to a higher demand</li>
     </ul>
 
-    <p>For the purpose of this tutorial we made the following assumptions:</p>
-    <ul>
-        <li>Pricer is a fast producer, with a total update rate reaching 10,000 messages/sec on a single stream.</li>
-        <li>Users are around the globe, network is not reliable and client connections could be slow</li>
-        <li>User should only see the latest tick for any currency pair at any point in time</li>
-    </ul>
-
     <h3>High level architecture</h3>
 
     <img src="tutorial/img/hl1.png"/>
 
     <p>Reactive FX is a distributed system that consists of Distributor and Pricer components, and runs on multiple
         interconnected
-        nodes. For the purposes of this tutorial we are assuming four independent nodes: one running Distributor and
+        nodes.
+    </p>
+    <p>
+        Pricer component represents a stateless 'data source' that generates a stream of price updates for a given currency pair on demand.
+    </p>
+    <p>
+        Distributor component represents a websocket server that manages client connections and subscribes with the Pricer for
+        price streams on behalf of the end user.
+    </p>
+    <p>For the purposes of this tutorial we are assuming four independent nodes: one running Distributor and
         others
         running Pricer replicas. Distributor component listens on port 8080 and accepts websocket connections. Pricer
         replicas listen on ports 8881, 8882 and 8883. For the purposes of the tutorial we are going to run the entire
@@ -58,6 +69,14 @@
                                     class="shortcut">BackendBootstrap</a> and <a
                 href="#code/app/backend/pricer/Pricer.scala" class="shortcut">Pricer</a> to get an idea how the
         components are started).</p>
+
+    <p>For the purpose of this tutorial we made the following assumptions:</p>
+    <ul>
+        <li>Pricer is a fast producer, with a total update rate reaching 10,000 messages/sec on a single stream.</li>
+        <li>Users are around the globe, network is not reliable and client connections could be slow</li>
+        <li>User should only see the latest tick for any currency pair at any point in time</li>
+    </ul>
+
 
 </div>
 
@@ -100,11 +119,11 @@
     case Success(binding) => self ! SuccessfulBinding(binding)
     case Failure(x) => self ! BindingFailed(x)
   }</code></pre>
-    <p><code>bindAndHandleSync</code> returns a <code>Future[ServerBinding]</code>. In our implementation we simply log
-        the status of the binding, but you may want, for example, to terminate the process or to try again.</p>
+    <p><code>bindAndHandleSync</code> returns a <code>Future[ServerBinding]</code>.</p>
 
     <p>
-        Handler is used to make a decision on an incoming request. Here you can, for example, implement a routing based
+        Handler passed to the <code>bindAndHandleSync</code> and defined below is used to make a decision on an incoming request.
+        Here you can, for example, implement a routing based
         on request parameters or to start a specific flavour of a stream:
     </p>
       <pre><code> val requestHandler: HttpRequest => HttpResponse = {
