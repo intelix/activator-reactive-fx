@@ -252,9 +252,8 @@
     </p>
 
     <p>
-        This actor constructs a flow specification that, once materialized, connects to the provided TCP endpoint, and
-        if successful, attaches it to the processing pipeline. If connection can not be established of flow terminates
-        (as a result of the underlying connection termination, for example), it retries with another endpoint.
+        This actor constructs a flow specification that attempts to connect to the provided TCP endpoint once the stream is materialised.
+        If connection is successful it gets attached to the processing pipeline. If connection can't be established actor retries connecting to another endpoint.
     </p>
     <p>
         The fundamental approach is similar to the one we've seen before and some code should look
@@ -282,6 +281,11 @@
         to open TCP connection to the provided destination and, if successful, the data will start flowing through the
         stages.
     </p>
+
+    <p>
+        <img src="tutorial/img/crossing_jvm.png"/>
+    </p>
+
 
     <p>At this point, we have two independent streams running - one attached to the client websocket connection, and one connected to the remote Pricer.
     We are going to see how these two streams can be linked in the following sections of the tutorial.</p>
@@ -400,7 +404,7 @@
         Reactive FX allows users to subscribe to any currency pair price stream. Once subscription is live,
         Pricer is going to produce 500 updates/second (this is the default setting, and can be adjusted in the
         <a href="#code/conf/backend.conf" class="shortcut">backend.conf</a>, <code>updates-per-ccy-per-sec</code>.)
-        Now consider what happens whtn ten clients subscribed to the same ten currency pairs each. If we create a
+        Now consider what happens when ten clients subscribe to the same ten currency pairs each. If we create a
         dedicated stream to the Pricer for each connected client, this would result in 50000 updates/second
         between the Distributor and Pricer components. To optimise this, we want to subscribe only to the unique
         currency pairs with the Pricer and then locally distribute the prices to all subscribed streams.
@@ -698,7 +702,7 @@
 
     <p>
         The implementation can be easily improved by implementing watermark demand strategy, when a demand of M is
-        requested when current demand state is N or below. The Akka Streams equivalent is <code>WatermarkRequestStrategy</code>.
+        requested when current demand state is N or below. The Akka Streams equivalent is <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-integrations.html#ActorSubscriber" class="shortcut">WatermarkRequestStrategy.scala</a>.
     </p>
 
 </div>
@@ -794,7 +798,10 @@
     </p>
 
     <p>
-        start the ip_relay tool :
+        Download <code>ip_relay</code> tool from <a href="http://www.stewart.com.au/ip_relay/">http://www.stewart.com.au/ip_relay</a>. We are going to use it as a proxy for our connection to the server.
+    </p>
+    <p>
+        start the tool :
     </p>
     <pre><code>ip_relay.pl 8081:localhost:8080</code></pre>
     <p>
