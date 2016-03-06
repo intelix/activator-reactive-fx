@@ -30,7 +30,9 @@ object Pricer {
         Supervision.Stop
     }
 
-    implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system).withSupervisionStrategy(decider).withDebugLogging(enable = false))
+    implicit val materializer = ActorMaterializer(ActorMaterializerSettings(system)
+      .withSupervisionStrategy(decider)
+      .withDebugLogging(enable = false))
 
     Tcp().bind(host, port) runForeach { connection =>
       logger.info(s"New connection from ${connection.remoteAddress}")
