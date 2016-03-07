@@ -125,7 +125,7 @@
     <p><code>bindAndHandleSync</code> returns a <code>Future[ServerBinding]</code>.</p>
 
     <p>
-        The gandler passed to the <code>bindAndHandleSync</code> and defined below is used to make a decision on an incoming request.
+        The handler passed to the <code>bindAndHandleSync</code> and defined below is used to make a decision on an incoming request.
         Here you can, for example, implement a routing based
         on request parameters or to start a specific flavour of a stream:
     </p>
@@ -722,8 +722,8 @@
 </code></pre>
 
     <p>
-        The implementation can be easily improved by implementing watermark demand strategy, when a demand of M is
-        requested when current demand state is N or below. The Akka Streams equivalent is <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-integrations.html#ActorSubscriber" class="shortcut">WatermarkRequestStrategy.scala</a>.
+        The implementation can be easily improved by implementing watermark demand strategy. This insures demand is
+        kept between a specified lower and upper bound. The Akka Streams equivalent is <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala/stream-integrations.html#ActorSubscriber" class="shortcut">WatermarkRequestStrategy.scala</a>.
     </p>
 
 </div>
@@ -733,15 +733,15 @@
 
     <p>
         On the client-bound side of the flow we have to deal with a high-velocity data stream. If any of the connected
-        clients can't keep up with the rate of the updates this should not affect any other client or Pricer in any way.
-        Also, to remind you, we made an assumption that the client is only interested in the very latest price update for a given currency pair at any
-        point in time. Therefore, if there are more than one price ticks available for the same currency pair, we have to deliver
-        only the latest one and can drop all the previous ones.
+        clients can't keep up with the rate of updates, this should not affect any other client or Pricer in any way.
+        Also, to remind you, we made an assumption that the client is only interested in the very latest price update
+        for a given currency pair at any point in time. Therefore, if there is more than one price tick available
+        for the same currency pair, we deliver only the latest one dropping all previous ones.
     </p>
 
     <p>
-        The reference implementation is in PricerStreamEndpointStage (a producer) and DistributorEndpointStage (a
-        consumer). Let's break it down.
+        The reference implementation is in <code>ricerStreamEndpointStage</code> (a producer) and
+        <code>DistributorEndpointStage</code> (a consumer). Let's break it down.
     </p>
 
     <p>
@@ -749,7 +749,7 @@
     </p>
 
     <p>
-        We are keeping track of all live websocket streams and their active subscriptions:
+        We keep track of all live websocket streams and their active subscriptions:
     </p>
       <pre><code>   var activeDistributorStreams: Set[ActorRef] = Set()
     var openSubscriptions: Map[Short, List[ActorRef]] = Map()
@@ -804,7 +804,7 @@
 <div>
     <h2>OS-level TCP buffers</h2>
     <p>
-        When TCP-based endpoint is used in the stream design you need to consider inbound and outbound OS-level TCP
+        When a TCP-based endpoint is used in the stream design, you need to consider inbound and outbound OS-level TCP
         buffers on both ends of the connection. Depending on your environment configuration they may have a significant
         effect on the behaviour of the system.
     </p>
@@ -819,10 +819,11 @@
     </p>
 
     <p>
-        Download <code>ip_relay</code> tool from <a href="http://www.stewart.com.au/ip_relay/">http://www.stewart.com.au/ip_relay</a>. We are going to use it as a proxy for our connection to the server.
+        Download <code>ip_relay</code> tool from <a href="http://www.stewart.com.au/ip_relay/">http://www.stewart.com.au/ip_relay</a>.
+        We are going to use it as a proxy for our connection to the server.
     </p>
     <p>
-        start the tool :
+        Start the tool:
     </p>
     <pre><code>ip_relay.pl 8081:localhost:8080</code></pre>
     <p>
@@ -832,7 +833,7 @@
     </p>
 
     <p>
-        Subscribing to one currency pair. Note the metrics in the logs:
+        Subscribe to one currency pair. Note the metrics in the logs:
     </p>
       <pre><code>[info] 2016-02-27 19:09:36.530 Metrics: type=GAUGE, name=pricer.1.msgOut, value=498
  [info] 2016-02-27 19:09:36.530 Metrics: type=GAUGE, name=websocket.1.msgOut, value=497
@@ -860,8 +861,8 @@
     <p>
         The traffic will resume at normal speed. You should be able to see the immediate effect - prices will spin very
         fast for a second or so and they will go back to a regular pace. This spike happens because the shaping is
-        applied before the transport layer, and if client becomes irresponsive for a period of time, the messages will
-        be queued in the tcp buffer on the sending side and then produce a spike once client becomes available.
+        applied before the transport layer, and if client becomes unresponsive for a period of time, the messages will
+        be queued in the tcp buffer on the sending side and then produce a spike once the client becomes available.
     </p>
 </div>
 
@@ -913,7 +914,7 @@
     <h3>Websocket connection becomes slow</h3>
 
     <p>
-        If for any reason client is unable to keep up with the incoming rate of updates, that should not affect any
+        If for any reason the client is unable to keep up with the incoming rate of updates, that should not affect any
         other client in the system nor the source of the data. This is achieved with a flow control strategy put in
         place at the point when client-side stream receives a price update from the source. The update is forwarded to
         the client if there is a demand otherwise the local snapshot of the price is updated and the message is dropped.
