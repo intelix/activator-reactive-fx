@@ -2,8 +2,10 @@ package backend.distributor
 
 import akka.actor._
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.HttpMethods.GET
+import akka.http.scaladsl.model.StatusCodes.{NotFound, BadRequest}
 import akka.http.scaladsl.model.ws.UpgradeToWebsocket
-import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, Uri}
+import akka.http.scaladsl.model._
 import akka.stream._
 import backend.shared.CodecStage
 import com.typesafe.scalalogging.StrictLogging
@@ -42,7 +44,7 @@ private class Distributor extends Actor with StrictLogging {
   val requestHandler: HttpRequest => HttpResponse = {
 
     // Handler for /
-    case req@HttpRequest(HttpMethods.GET, Uri.Path("/"), _, _, _) =>
+    case req@HttpRequest(GET, Uri.Path("/"), _, _, _) =>
       req.header[UpgradeToWebsocket] match {
         case Some(upgrade) =>
           connectionCounter += 1
@@ -50,9 +52,9 @@ private class Distributor extends Actor with StrictLogging {
           upgrade.handleMessages(buildFlow(connectionCounter))
         case None =>
           // not a websocket request
-          HttpResponse(400, entity = "Not a valid websocket request!")
+          HttpResponse(BadRequest, entity = "Not a valid websocket request!")
       }
-    case _: HttpRequest => HttpResponse(404, entity = "Unknown resource!")
+    case _: HttpRequest => HttpResponse(NotFound, entity = "Unknown resource!")
   }
 
   // Initalise the listener and setup the handler
@@ -64,8 +66,12 @@ private class Distributor extends Actor with StrictLogging {
   }
 
   // Flow spec
-  def buildFlow(connId: Int) =
-    WebsocketFrameStage() atop CodecStage() atop MetricsStage(connId) atop ShapingStage(1000) join DistributorEndpointStage(connId, StreamRegistry.selection)
+  def buildFlow(connectionId: Int) =
+    WebsocketFrameStage() atop
+      CodecStage() atop
+      MetricsStage(connectionId) atop
+      ShapingStage(1000) join // messages per second
+      DistributorEndpointStage(connectionId, StreamRegistry.selection)
 
   private case class SuccessfulBinding(binding: Http.ServerBinding)
 
